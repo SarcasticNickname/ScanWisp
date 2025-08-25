@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+     Базовая тема приложения.
+     Используется системой до того, как Jetpack Compose отрисует UI.
+     Необходима для корректной работы Splash Screen и общего окна приложения.
+    -->
+    <style name="Theme.ScanWisp" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+     Стиль Theme.ScanWisp.Cropper был УДАЛЕН, так как он не используется
+     и был предназначен для сторонней библиотеки, от которой отказались в пользу ML Kit.
+    -->
+
+</resources>

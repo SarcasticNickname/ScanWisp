@@ -1,0 +1,100 @@
+# ==============================================================================
+#  Версии зависимостей и плагинов, отсортированные по алфавиту
+# ==============================================================================
+[versions]
+activityCompose = "1.10.1"
+ads = "23.2.0"
+agp = "8.11.1"
+coil = "2.6.0"
+composeBom = "2024.09.00"
+composeCompiler = "2.1.21-2.0.1" # Соответствует версии Kotlin
+coreKtx = "1.16.0"
+datastore = "1.1.1"
+espressoCore = "3.6.1"
+hilt = "2.56.2"
+hiltNavigationCompose = "1.2.0"
+junit = "4.13.2"
+junitExt = "1.2.1"
+kotlin = "2.1.21"
+ksp = "2.1.21-2.0.1"
+lifecycleRuntimeKtx = "2.9.1"
+materialIcons = "1.7.7"
+mlkitScanner = "16.0.0-beta1"
+navigationCompose = "2.7.7"
+pdfbox = "2.0.27.0"
+reorderable = "0.9.6"
+room = "2.7.2"
+shimmer = "1.2.0"
+material3WindowSizeClassAndroid = "1.3.2"
+exifinterface = "1.3.6"
+
+# ==============================================================================
+#  Плагины Gradle
+# ==============================================================================
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+
+# ==============================================================================
+#  Библиотеки, сгруппированные по назначению
+# ==============================================================================
+[libraries]
+# --- AndroidX & Jetpack Core ---
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+
+# --- Compose ---
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIcons" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+# --- Hilt (Dependency Injection) ---
+hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
+hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
+androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
+
+# --- Room (Database) ---
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+
+# --- Data & Storage ---
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# --- UI Utilities ---
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+reorderable = { group = "org.burnoutcrew.composereorderable", name = "reorderable", version.ref = "reorderable" }
+shimmer = { group = "com.valentinilk.shimmer", name = "compose-shimmer", version.ref = "shimmer"}
+
+# --- PDF & Document Processing ---
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox" }
+google-mlkit-scanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version.ref = "mlkitScanner" }
+
+# --- Google Services ---
+google-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "ads" }
+
+# --- Testing ---
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitExt" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-material3-window-size-class1-android = { group = "androidx.compose.material3", name = "material3-window-size-class-android", version.ref = "material3WindowSizeClassAndroid" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
+
+
+# ==============================================================================
+#  "Бандлы" для группового подключения зависимостей
+# ==============================================================================
+[bundles]
+room = ["androidx-room-runtime", "androidx-room-ktx"]
+compose-debug = ["androidx-compose-ui-tooling", "androidx-compose-ui-test-manifest"]
