@@ -4,7 +4,7 @@
 [versions]
 activityCompose = "1.10.1"
 ads = "23.2.0"
-agp = "8.11.1"
+agp = "8.13.0"
 coil = "2.6.0"
 composeBom = "2024.09.00"
 composeCompiler = "2.1.21-2.0.1" # Соответствует версии Kotlin
@@ -27,6 +27,8 @@ room = "2.7.2"
 shimmer = "1.2.0"
 material3WindowSizeClassAndroid = "1.3.2"
 exifinterface = "1.3.6"
+metricsPerformance = "1.0.0-beta03"
+ump = "2.3.0"
 
 # ==============================================================================
 #  Плагины Gradle
@@ -80,6 +82,7 @@ google-mlkit-scanner = { group = "com.google.android.gms", name = "play-services
 
 # --- Google Services ---
 google-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "ads" }
+google-ump = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "ump" }
 
 # --- Testing ---
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -90,6 +93,7 @@ androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-material3-window-size-class1-android = { group = "androidx.compose.material3", name = "material3-window-size-class-android", version.ref = "material3WindowSizeClassAndroid" }
 androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
+androidx-metrics-performance = { group = "androidx.metrics", name = "metrics-performance", version.ref = "metricsPerformance" }
 
 
 # ==============================================================================

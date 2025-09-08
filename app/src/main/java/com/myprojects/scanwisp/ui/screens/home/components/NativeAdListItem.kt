@@ -20,6 +20,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +37,19 @@ import com.myprojects.scanwisp.R
 
 @Composable
 fun NativeAdListItem(nativeAd: NativeAd, modifier: Modifier = Modifier) {
+    /**
+     * ==========================================================
+     * ИЗМЕНЕНИЕ: Добавлен DisposableEffect.
+     * Гарантирует, что `nativeAd.destroy()` будет вызван, когда
+     * Composable покидает композицию, предотвращая утечки памяти.
+     * ==========================================================
+     */
+    DisposableEffect(nativeAd) {
+        onDispose {
+            nativeAd.destroy()
+        }
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -43,7 +57,6 @@ fun NativeAdListItem(nativeAd: NativeAd, modifier: Modifier = Modifier) {
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
     ) {
-        // NativeAdView - это контейнер из Android Views, который необходим AdMob
         AndroidView(
             modifier = Modifier.fillMaxWidth(),
             factory = { context ->
@@ -51,7 +64,6 @@ fun NativeAdListItem(nativeAd: NativeAd, modifier: Modifier = Modifier) {
                 val composeView = ComposeView(context)
                 adView.addView(composeView)
 
-                // Связываем composeView с NativeAd
                 composeView.setContent {
                     NativeAdListContent(nativeAd = nativeAd, adView = adView)
                 }
@@ -63,11 +75,9 @@ fun NativeAdListItem(nativeAd: NativeAd, modifier: Modifier = Modifier) {
 
 @Composable
 private fun NativeAdListContent(nativeAd: NativeAd, adView: NativeAdView) {
-    // Устанавливаем NativeAd для NativeAdView. Это обязательно.
     adView.setNativeAd(nativeAd)
 
     Box {
-        // --- Скрытые View для регистрации кликов AdMob ---
         AndroidView(
             factory = { context ->
                 val hiddenViews = FrameLayout(context).apply {
@@ -81,7 +91,6 @@ private fun NativeAdListContent(nativeAd: NativeAd, adView: NativeAdView) {
             }
         )
 
-        // --- Видимый UI на Jetpack Compose ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -92,9 +101,7 @@ private fun NativeAdListContent(nativeAd: NativeAd, adView: NativeAdView) {
             nativeAd.icon?.uri?.let {
                 AsyncImage(
                     model = it,
-                    // START: AI_MODIFIED_BLOCK
                     contentDescription = stringResource(R.string.ad_cd_icon),
-                    // END: AI_MODIFIED_BLOCK
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(8.dp))
@@ -107,9 +114,7 @@ private fun NativeAdListContent(nativeAd: NativeAd, adView: NativeAdView) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        // START: AI_MODIFIED_BLOCK
                         text = stringResource(R.string.ad_label),
-                        // END: AI_MODIFIED_BLOCK
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier
                             .background(

@@ -9,10 +9,10 @@
         <item quantity="other">%1$d документа</item>
     </plurals>
     <plurals name="selection_count">
-        <item quantity="one">%1$d выбран</item>
-        <item quantity="few">%1$d выбрано</item>
-        <item quantity="many">%1$d выбрано</item>
-        <item quantity="other">%1$d выбрано</item>
+        <item quantity="one">Выбран %1$d</item>
+        <item quantity="few">Выбрано %1$d</item>
+        <item quantity="many">Выбрано %1$d</item>
+        <item quantity="other">Выбрано %1$d</item>
     </plurals>
 
     <!-- Общие -->
@@ -22,6 +22,7 @@
     <string name="action_share">Поделиться</string>
     <string name="action_rename">Переименовать</string>
     <string name="action_move">Переместить</string>
+    <string name="action_merge">Объединить</string>
     <string name="loading">Загрузка…</string>
     <string name="error_loading_image">Ошибка загрузки изображения</string>
     <string name="state_selected">Выбрано</string>
@@ -34,21 +35,21 @@
 
     <!-- HomeScreen & Components -->
     <string name="home_screen_title_default">Мои документы</string>
-    <string name="home_top_bar_cd_toggle_view">Переключить вид</string>
+    <string name="home_top_bar_cd_toggle_view">Переключить вид: сетка или список</string>
     <string name="home_top_bar_cd_more_actions">Дополнительные действия</string>
     <string name="home_top_bar_menu_select_all">Выбрать всё</string>
-    <string name="home_top_bar_action_search">Поиск</string>
-    <string name="home_top_bar_action_sort">Сортировка</string>
+    <string name="home_top_bar_action_search">Поиск документов</string>
+    <string name="home_top_bar_action_sort">Параметры сортировки</string>
     <string name="home_top_bar_search_placeholder">Поиск по названию…</string>
-    <string name="home_top_bar_cd_back">Назад</string>
+    <string name="home_top_bar_cd_back">Закрыть поиск</string>
     <string name="home_top_bar_cd_clear_search">Очистить поиск</string>
     <string name="home_selection_bar_cd_clear_selection">Сбросить выбор</string>
-    <string name="home_selection_bar_cd_merge">Объединить документы</string>
+    <string name="home_selection_bar_cd_merge">Объединить выбранные документы</string>
     <string name="home_selection_bar_cd_delete">Удалить выбранные</string>
-    <string name="home_selection_bar_cd_save">Сохранить на устройство</string>
-    <string name="home_selection_bar_cd_share">Поделиться</string>
-    <string name="home_selection_bar_cd_move">Переместить</string>
-    <string name="fab_cd_scan_document">Сканировать документ</string>
+    <string name="home_selection_bar_cd_save">Сохранить выбранные на устройство</string>
+    <string name="home_selection_bar_cd_share">Поделиться выбранными</string>
+    <string name="home_selection_bar_cd_move">Переместить выбранные</string>
+    <string name="fab_cd_scan_document">Сканировать новый документ</string>
     <string name="empty_state_title_no_documents">Документы не найдены</string>
     <string name="empty_state_subtitle_no_documents">Нажмите на иконку камеры, чтобы отсканировать ваш первый документ.</string>
     <string name="empty_state_cta_scan_document">Сканировать документ</string>
@@ -86,32 +87,31 @@
     <string name="document_action_menu_download">Скачать</string>
 
     <!-- Native Ad -->
-    <string name="ad_label">Ad</string>
-    <string name="ad_cd_image">Ad image</string>
-    <string name="ad_cd_icon">Ad icon</string>
+    <string name="ad_label">Реклама</string>
+    <string name="ad_cd_image">Рекламное изображение</string>
+    <string name="ad_cd_icon">Иконка рекламодателя</string>
 
     <!-- DetailScreen & Components -->
-    <string name="detail_top_bar_cd_edit_title">Редактировать название</string>
+    <string name="detail_top_bar_cd_edit_title">Редактировать название документа</string>
     <string name="detail_top_bar_cd_back">Назад к списку документов</string>
     <string name="detail_top_bar_cd_share">Поделиться документом</string>
-    <string name="detail_top_bar_cd_move">Переместить документ</string>
+    <string name="detail_top_bar_cd_move">Переместить документ в другую папку</string>
     <string name="detail_top_bar_cd_toggle_sort">Включить режим сортировки страниц</string>
     <string name="detail_page_menu_set_as_cover">Сделать обложкой</string>
-    <string name="detail_page_menu_share_jpeg">Поделиться (JPEG)</string>
+    <string name="detail_page_menu_share_jpeg">Поделиться страницей как JPEG</string>
     <string name="detail_page_card_cd">Страница %1$d</string>
     <string name="detail_page_card_cd_actions">Действия со страницей %1$d</string>
-    <string name="detail_page_card_state_draggable">, можно перетащить</string>
-    <string name="detail_selection_bar_cd_cancel">Отменить выбор</string>
-    <string name="detail_selection_bar_cd_split">Разъединить страницы в новые документы</string>
+    <string name="detail_page_card_state_draggable">, можно перетащить для сортировки</string>
+    <string name="detail_selection_bar_cd_cancel">Отменить выбор страниц</string>
+    <string name="detail_selection_bar_cd_split">Разъединить выбранные страницы в новые документы</string>
     <string name="detail_selection_bar_cd_delete">Удалить выбранные страницы</string>
     <string name="detail_selection_bar_cd_share">Поделиться выбранными страницами</string>
     <string name="detail_sort_mode_bar_title">Изменение порядка</string>
     <string name="detail_sort_mode_bar_cd_done">Завершить сортировку</string>
-    <string name="fab_cd_add_pages">Добавить новые страницы</string>
+    <string name="fab_cd_add_pages">Добавить новые страницы в документ</string>
     <string name="toast_add_pages_cancelled">Добавление страниц отменено</string>
     <string name="toast_no_app_to_share">Нет подходящих приложений для отправки</string>
 
-    <!-- START: AI_MODIFIED_BLOCK -->
     <!-- Folders Screen -->
     <string name="folders_screen_title">Папки</string>
     <string name="folders_empty_state_title">Папок пока нет</string>
@@ -137,7 +137,7 @@
     <!-- Preview Screen -->
     <string name="preview_screen_title">Просмотр страницы</string>
     <string name="preview_cd_back">Назад к деталям документа</string>
-    <string name="preview_cd_page_content">Просмотр страницы</string>
+    <string name="preview_cd_page_content">Просмотр содержимого страницы</string>
     <string name="preview_action_rescan">Переснять</string>
     <string name="toast_page_replaced">Страница заменена</string>
     <string name="toast_replace_cancelled">Замена отменена</string>
@@ -162,5 +162,4 @@
     <string name="settings_pdf_quality_high_desc">Для фотографий и архивации. Наилучшее качество, большой размер файла.</string>
     <string name="settings_dialog_title_theme">Выберите тему</string>
     <string name="settings_dialog_title_pdf">Выберите качество PDF</string>
-    <!-- END: AI_MODIFIED_BLOCK -->
 </resources>

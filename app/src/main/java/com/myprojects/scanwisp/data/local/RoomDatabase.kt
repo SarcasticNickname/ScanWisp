@@ -8,8 +8,8 @@ import com.myprojects.scanwisp.data.local.model.PageEntity
 
 @Database(
     entities = [DocumentEntity::class, PageEntity::class, FolderEntity::class],
-    version = 3,
-    exportSchema = false
+    version = 6,
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun documentDao(): DocumentDao

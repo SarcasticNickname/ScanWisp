@@ -29,15 +29,20 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,14 +54,16 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.google.android.gms.ads.nativead.NativeAd
+import com.google.android.play.core.review.ReviewManagerFactory
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.myprojects.scanwisp.R
-import com.myprojects.scanwisp.data.local.model.DocumentWithPages
+import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.domain.model.ViewMode
 import com.myprojects.scanwisp.ui.components.EmptyState
 import com.myprojects.scanwisp.ui.components.FullScreenLoader
+import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.navigation.Screen
 import com.myprojects.scanwisp.ui.screens.home.components.DocumentGrid
 import com.myprojects.scanwisp.ui.screens.home.components.DocumentListItem
@@ -68,6 +75,10 @@ import com.myprojects.scanwisp.ui.screens.home.components.RenameDialog
 import com.myprojects.scanwisp.ui.screens.home.components.ScanWispBottomAppBar
 import com.myprojects.scanwisp.ui.screens.home.components.SortBottomSheet
 import com.myprojects.scanwisp.ui.state.HomeScreenUiState
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,8 +88,76 @@ fun HomeScreen(
     widthSizeClass: WindowWidthSizeClass
 ) {
     val uiState by viewModel.uiState.collectAsState()
-
     val context = LocalContext.current
+    val activity = context as? Activity
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var tempFileToClean: File? by remember { mutableStateOf(null) }
+
+    val shareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        tempFileToClean?.let { viewModel.cleanUpTempFile(it) }
+        tempFileToClean = null
+    }
+
+    val saveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val destinationUri = result.data?.data
+        tempFileToClean?.let {
+            viewModel.handleSaveResult(destinationUri, it)
+        }
+        tempFileToClean = null
+    }
+
+    LaunchedEffect(key1 = true, key2 = activity) {
+        viewModel.uiEventFlow.collectLatest { event ->
+            when (event) {
+                is UiEvent.ShowSnackbar -> {
+                    scope.launch {
+                        val result = snackbarHostState.showSnackbar(
+                            message = event.message,
+                            actionLabel = event.actionLabel
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            if (event.actionLabel == context.getString(R.string.action_cancel)) {
+                                viewModel.undoDelete()
+                            }
+                        }
+                    }
+                }
+
+                is UiEvent.LaunchShareIntent -> {
+                    tempFileToClean = event.tempFile
+                    shareLauncher.launch(event.intent)
+                }
+
+                is UiEvent.LaunchSaveIntent -> {
+                    tempFileToClean = event.tempFile
+                    saveLauncher.launch(event.intent)
+                }
+
+                is UiEvent.RequestInAppReview -> {
+                    if (activity != null) {
+                        scope.launch {
+                            try {
+                                val reviewManager = ReviewManagerFactory.create(activity)
+                                val reviewInfo = reviewManager.requestReviewFlow().await()
+                                reviewManager.launchReviewFlow(activity, reviewInfo)
+                            } catch (e: Exception) {
+                                Log.e("InAppReview", "Failed to launch review flow", e)
+                            }
+                        }
+                    }
+                }
+
+                else -> Unit
+            }
+        }
+    }
+
     val scannerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
@@ -87,14 +166,12 @@ fun HomeScreen(
                 if (!pageUris.isNullOrEmpty()) {
                     viewModel.createNewDocument(pageUris)
                 } else {
-                    // START: AI_MODIFIED_BLOCK - ИСПРАВЛЕНО
                     Toast.makeText(
                         context,
                         context.getString(R.string.toast_failed_to_get_images),
                         Toast.LENGTH_SHORT
                     )
                         .show()
-                    // END: AI_MODIFIED_BLOCK
                 }
             }
         }
@@ -105,13 +182,11 @@ fun HomeScreen(
         if (!uris.isNullOrEmpty()) {
             viewModel.createNewDocument(uris)
         } else {
-            // START: AI_MODIFIED_BLOCK - ИСПРАВЛЕНО
             Toast.makeText(
                 context,
                 context.getString(R.string.toast_image_selection_cancelled),
                 Toast.LENGTH_SHORT
             ).show()
-            // END: AI_MODIFIED_BLOCK
         }
     }
 
@@ -122,7 +197,6 @@ fun HomeScreen(
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build()
     )
     val onScanClick: () -> Unit = {
-        val activity = context as? Activity
         if (activity != null) {
             try {
                 scanner.getStartScanIntent(activity)
@@ -174,6 +248,7 @@ fun HomeScreen(
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val dataState = uiState as? HomeScreenUiState.Data
             HomeTopAppBar(
@@ -278,10 +353,10 @@ fun HomeScreen(
 
     showRenameDialogForDocumentId?.let { documentId ->
         val currentDocument =
-            (uiState as? HomeScreenUiState.Data)?.documents?.find { it.document.id == documentId }
+            (uiState as? HomeScreenUiState.Data)?.documents?.find { it.id == documentId }
         if (currentDocument != null) {
             RenameDialog(
-                currentTitle = currentDocument.document.title,
+                currentTitle = currentDocument.title,
                 onDismissRequest = { showRenameDialogForDocumentId = null },
                 onConfirm = { newTitle ->
                     viewModel.renameDocument(documentId, newTitle)
@@ -338,6 +413,7 @@ fun HomeScreenContent(
             DocumentGrid(
                 documents = state.documents,
                 nativeAd = state.nativeAd,
+                adPosition = state.adPosition,
                 selectedIds = state.selectedDocumentIds,
                 isSelectionMode = state.isSelectionModeActive,
                 onDocumentClick = { documentId ->
@@ -356,11 +432,15 @@ fun HomeScreenContent(
                 widthSizeClass = widthSizeClass
             )
         } else { // ViewMode.LIST
-            val listItems = remember(state.documents, state.nativeAd) {
+            val listItems = remember(state.documents, state.nativeAd, state.adPosition) {
                 val items: MutableList<Any> = state.documents.toMutableList()
-                val adPosition = 1
+                val adPosition = state.adPosition
                 if (state.nativeAd != null && items.size >= adPosition) {
                     items.add(adPosition, state.nativeAd)
+                } else if (state.nativeAd != null && items.isNotEmpty()) {
+                    items.add(state.nativeAd)
+                } else if (state.nativeAd != null && items.isEmpty()) {
+                    items.add(state.nativeAd)
                 }
                 items
             }
@@ -371,15 +451,15 @@ fun HomeScreenContent(
             ) {
                 items(
                     items = listItems,
-                    key = { item -> if (item is DocumentWithPages) item.document.id else "ad_list_item" },
-                    contentType = { item -> if (item is DocumentWithPages) "doc" else "ad" }
+                    key = { item -> if (item is DocumentRow) item.id else "ad_list_item" },
+                    contentType = { item -> if (item is DocumentRow) "doc" else "ad" }
                 ) { item ->
                     when (item) {
-                        is DocumentWithPages -> {
-                            val documentId = item.document.id
+                        is DocumentRow -> {
+                            val documentId = item.id
                             Box(modifier = Modifier.animateItemPlacement()) {
                                 DocumentListItem(
-                                    documentWithPages = item,
+                                    documentRow = item,
                                     isSelected = documentId in state.selectedDocumentIds,
                                     isSelectionMode = state.isSelectionModeActive,
                                     onClick = {

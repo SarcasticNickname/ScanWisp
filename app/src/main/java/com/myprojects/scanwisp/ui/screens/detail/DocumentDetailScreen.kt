@@ -126,6 +126,7 @@ fun DocumentDetailScreen(
                             withDismissAction = true
                         )
                         if (result == SnackbarResult.ActionPerformed) {
+                            // ФИКС: Используем строковый ресурс вместо хардкода
                             if (event.actionLabel == context.getString(R.string.action_cancel)) {
                                 viewModel.undoDeletePages()
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -147,12 +148,12 @@ fun DocumentDetailScreen(
                     }
                 }
 
-                is UiEvent.LaunchSaveIntent -> { /* No-op for this screen */
-                }
-
                 is UiEvent.NavigateBack -> {
                     navController.popBackStack()
                 }
+
+                // ФИКС: Добавляем else ветку, чтобы when был исчерпывающим
+                else -> Unit
             }
         }
     }

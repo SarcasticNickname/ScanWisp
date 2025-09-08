@@ -49,7 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import com.myprojects.scanwisp.R
-import com.myprojects.scanwisp.data.local.model.DocumentWithPages
+import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.ui.components.ShimmeringCard
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -58,7 +58,7 @@ import java.util.Locale
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DocumentListItem(
-    documentWithPages: DocumentWithPages,
+    documentRow: DocumentRow,
     isSelected: Boolean,
     isSelectionMode: Boolean,
     onClick: () -> Unit,
@@ -70,7 +70,6 @@ fun DocumentListItem(
     onDeleteRequest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val document = documentWithPages.document
     val interactionSource = remember { MutableInteractionSource() }
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -80,15 +79,12 @@ fun DocumentListItem(
         label = "list_item_background_color_animation"
     )
 
-    // START: AI_MODIFIED_BLOCK - Строки вынесены в ресурсы
-    val formattedDate = formatDate(document.creationTimestamp)
+    val formattedDate = formatDate(documentRow.creationTimestamp)
     val pagesCountText =
-        stringResource(R.string.document_card_pages_count_format, documentWithPages.pages.size)
-    val fullContentDescription =
-        "${document.title}, $pagesCountText, $formattedDate"
+        stringResource(R.string.document_card_pages_count_format, documentRow.pageCount)
+    val fullContentDescription = "${documentRow.title}, $pagesCountText, $formattedDate"
     val stateDescSelected = stringResource(R.string.state_selected)
     val stateDescNotSelected = stringResource(R.string.state_not_selected)
-    // END: AI_MODIFIED_BLOCK
 
     Card(
         modifier = modifier
@@ -119,7 +115,7 @@ fun DocumentListItem(
                     .aspectRatio(1f / 1.41f) // A4 ratio
             ) {
                 SubcomposeAsyncImage(
-                    model = document.coverImagePath,
+                    model = documentRow.coverImagePath,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxWidth(),
@@ -127,9 +123,7 @@ fun DocumentListItem(
                     error = {
                         Image(
                             painter = painterResource(id = R.drawable.card_placeholder),
-                            // START: AI_MODIFIED_BLOCK
                             contentDescription = stringResource(R.string.error_loading_image),
-                            // END: AI_MODIFIED_BLOCK
                             contentScale = ContentScale.Crop
                         )
                     }
@@ -159,16 +153,14 @@ fun DocumentListItem(
                     .padding(vertical = 8.dp)
             ) {
                 Text(
-                    text = document.title,
+                    text = documentRow.title,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    // START: AI_MODIFIED_BLOCK
                     text = "$pagesCountText • $formattedDate",
-                    // END: AI_MODIFIED_BLOCK
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1
@@ -182,12 +174,10 @@ fun DocumentListItem(
                 ) {
                     Icon(
                         Icons.Default.MoreVert,
-                        // START: AI_MODIFIED_BLOCK
                         contentDescription = stringResource(
                             R.string.document_card_cd_more_actions,
-                            document.title
+                            documentRow.title
                         )
-                        // END: AI_MODIFIED_BLOCK
                     )
                 }
                 DocumentActionMenu(

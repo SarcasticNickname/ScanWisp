@@ -13,13 +13,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.ads.nativead.NativeAd
-import com.myprojects.scanwisp.data.local.model.DocumentWithPages
+import com.myprojects.scanwisp.data.local.DocumentRow
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DocumentGrid(
-    documents: List<DocumentWithPages>,
+    documents: List<DocumentRow>,
     nativeAd: NativeAd?,
+    adPosition: Int,
     selectedIds: Set<String>,
     isSelectionMode: Boolean,
     onDocumentClick: (String) -> Unit,
@@ -38,13 +39,14 @@ fun DocumentGrid(
         else -> 4
     }
 
-    val gridItems = remember(documents, nativeAd, columns) {
+    val gridItems = remember(documents, nativeAd, adPosition) {
         val items: MutableList<Any> = documents.toMutableList()
-        // START: AI_MODIFIED_BLOCK
-        val adPosition = 1 // Снижаем порог до 1
-        // END: AI_MODIFIED_BLOCK
         if (nativeAd != null && items.size >= adPosition) {
             items.add(adPosition, nativeAd)
+        } else if (nativeAd != null && items.isNotEmpty()) {
+            items.add(nativeAd)
+        } else if (nativeAd != null && items.isEmpty()) {
+            items.add(nativeAd)
         }
         items
     }
@@ -58,25 +60,24 @@ fun DocumentGrid(
     ) {
         items(
             items = gridItems,
-            key = { item -> if (item is DocumentWithPages) item.document.id else "ad" },
-            contentType = { item -> if (item is DocumentWithPages) "doc" else "ad" }
+            key = { item -> if (item is DocumentRow) item.id else "ad" },
+            contentType = { item -> if (item is DocumentRow) "doc" else "ad" }
         ) { item ->
             when (item) {
-                is DocumentWithPages -> {
-                    val document = item.document
-                    val isSelected = document.id in selectedIds
+                is DocumentRow -> {
+                    val isSelected = item.id in selectedIds
                     DocumentCard(
                         modifier = Modifier.animateItemPlacement(),
-                        documentWithPages = item,
+                        documentRow = item,
                         isSelected = isSelected,
                         isSelectionMode = isSelectionMode,
-                        onClick = { onDocumentClick(document.id) },
-                        onLongClick = { onDocumentLongClick(document.id) },
-                        onRenameRequest = { onRenameRequest(document.id) },
-                        onMoveRequest = { onMoveRequest(document.id) },
-                        onShareRequest = { onShareRequest(document.id) },
-                        onDownloadRequest = { onDownloadRequest(document.id) },
-                        onDeleteRequest = { onDeleteRequest(document.id) }
+                        onClick = { onDocumentClick(item.id) },
+                        onLongClick = { onDocumentLongClick(item.id) },
+                        onRenameRequest = { onRenameRequest(item.id) },
+                        onMoveRequest = { onMoveRequest(item.id) },
+                        onShareRequest = { onShareRequest(item.id) },
+                        onDownloadRequest = { onDownloadRequest(item.id) },
+                        onDeleteRequest = { onDeleteRequest(item.id) }
                     )
                 }
 

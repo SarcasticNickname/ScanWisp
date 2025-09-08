@@ -39,4 +39,9 @@ sealed class UiEvent {
      * Событие, которое указывает UI выполнить навигацию назад.
      */
     object NavigateBack : UiEvent()
+
+    /**
+     * Событие для запроса показа диалога оценки приложения.
+     */
+    object RequestInAppReview : UiEvent()
 }

@@ -7,6 +7,9 @@
         android:required="true" />
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Добавляем разрешение на доступ в интернет, необходимое для рекламы и Firebase -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
 
     <application
         android:name=".ScanWispApp"
@@ -21,6 +24,9 @@
         android:theme="@style/Theme.ScanWisp"
         tools:targetApi="31">
 
+        <!--
+            ЗАМЕНИТЕ ЭТОТ ТЕСТОВЫЙ ID НА ВАШ РЕАЛЬНЫЙ APP ID ИЗ КОНСОЛИ ADMOB ПЕРЕД РЕЛИЗОМ!
+        -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3940256099942544~3347511713" />
@@ -29,6 +35,22 @@
         <meta-data
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
             android:value="true" />
+
+        <!--
+            ====================================================================
+            ИСПРАВЛЕНИЕ ОШИБКИ СБОРКИ: Явное указание конфигурации AdServices
+
+            Этот блок решает конфликт между AdMob и Firebase Analytics.
+            'tools:replace="android:resource"' приказывает сборщику использовать
+            именно эту конфигурацию (@xml/gma_ad_services_config от AdMob)
+            и игнорировать другие, вызывавшие конфликт.
+            ====================================================================
+        -->
+        <property
+            android:name="android.adservices.AD_SERVICES_CONFIG"
+            android:resource="@xml/gma_ad_services_config"
+            tools:replace="android:resource" />
+
 
         <activity
             android:name=".MainActivity"

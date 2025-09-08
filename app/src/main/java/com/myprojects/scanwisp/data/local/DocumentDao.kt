@@ -1,5 +1,6 @@
 package com.myprojects.scanwisp.data.local
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -12,6 +13,16 @@ import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
 import com.myprojects.scanwisp.data.local.model.PageEntity
 import kotlinx.coroutines.flow.Flow
+
+@Immutable
+data class DocumentRow(
+    val id: String,
+    val title: String,
+    val coverImagePath: String,
+    val creationTimestamp: Long,
+    val pageCount: Int,
+    val folderId: String?
+)
 
 @Dao
 interface DocumentDao {
@@ -33,7 +44,7 @@ interface DocumentDao {
     @Transaction
     @Query(
         """
-        SELECT *, (SELECT COUNT(id) FROM documents WHERE folderId = folders.id) as documentCount
+        SELECT *, (SELECT COUNT(id) FROM documents WHERE folderId = folders.id AND deletionTimestamp IS NULL) as documentCount
         FROM folders
         ORDER BY creationTimestamp DESC
     """
@@ -49,19 +60,35 @@ interface DocumentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: DocumentEntity)
 
-    @Transaction
-    @Query("SELECT * FROM documents WHERE folderId IS NULL ORDER BY creationTimestamp DESC")
-    fun getOrphanDocumentsWithPages(): Flow<List<DocumentWithPages>>
+    @Query(
+        """
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
+               (SELECT COUNT(p.id) FROM pages p WHERE p.documentOwnerId = d.id) as pageCount
+        FROM documents d
+        WHERE d.folderId = :folderId AND d.title LIKE '%' || :query || '%' COLLATE NOCASE
+        AND d.deletionTimestamp IS NULL
+        ORDER BY d.creationTimestamp DESC
+    """
+    )
+    fun getDocumentRowsInFolder(folderId: String, query: String): Flow<List<DocumentRow>>
+
+    @Query(
+        """
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
+               (SELECT COUNT(p.id) FROM pages p WHERE p.documentOwnerId = d.id) as pageCount
+        FROM documents d
+        WHERE d.folderId IS NULL AND d.title LIKE '%' || :query || '%' COLLATE NOCASE
+        AND d.deletionTimestamp IS NULL
+        ORDER BY d.creationTimestamp DESC
+    """
+    )
+    fun getOrphanDocumentRows(query: String): Flow<List<DocumentRow>>
 
     @Transaction
-    @Query("SELECT * FROM documents WHERE folderId = :folderId ORDER BY creationTimestamp DESC")
-    fun getDocumentsWithPagesInFolder(folderId: String): Flow<List<DocumentWithPages>>
-
-    @Transaction
-    @Query("SELECT * FROM documents WHERE id = :documentId")
+    @Query("SELECT * FROM documents WHERE id = :documentId AND deletionTimestamp IS NULL")
     fun getDocumentWithPagesById(documentId: String): Flow<DocumentWithPages?>
 
-    @Query("SELECT * FROM documents WHERE id = :documentId LIMIT 1")
+    @Query("SELECT * FROM documents WHERE id = :documentId AND deletionTimestamp IS NULL LIMIT 1")
     suspend fun getDocumentById(documentId: String): DocumentEntity?
 
     @Update
@@ -70,13 +97,20 @@ interface DocumentDao {
     @Query("UPDATE documents SET folderId = :newFolderId WHERE id IN (:documentIds)")
     suspend fun moveDocumentsToFolder(documentIds: List<String>, newFolderId: String?)
 
+    @Query("UPDATE documents SET deletionTimestamp = :timestamp WHERE id IN (:documentIds)")
+    suspend fun markDocumentsForDeletion(documentIds: List<String>, timestamp: Long)
+
+    @Query("UPDATE documents SET deletionTimestamp = NULL WHERE id IN (:documentIds)")
+    suspend fun unmarkDocumentsForDeletion(documentIds: List<String>)
+
+    @Query("SELECT * FROM documents WHERE deletionTimestamp IS NOT NULL AND deletionTimestamp < :cutoffTimestamp")
+    suspend fun getDocumentsPendingDeletion(cutoffTimestamp: Long): List<DocumentEntity>
+
     @Query("DELETE FROM documents WHERE id = :documentId")
     suspend fun deleteDocumentById(documentId: String)
 
-    // START: AI_MODIFIED_BLOCK
     @Query("DELETE FROM documents WHERE id IN (:documentIds)")
     suspend fun deleteDocumentsByIds(documentIds: List<String>)
-    // END: AI_MODIFIED_BLOCK
 
 
     // --- Операции со Страницами ---
@@ -93,7 +127,7 @@ interface DocumentDao {
     @Query("SELECT * FROM pages WHERE id IN (:pageIds)")
     suspend fun getPagesByIds(pageIds: List<String>): List<PageEntity>
 
-    @Query("SELECT * FROM pages WHERE documentOwnerId = :documentId")
+    @Query("SELECT * FROM pages WHERE documentOwnerId = :documentId ORDER BY position ASC")
     suspend fun getAllPagesForDocument(documentId: String): List<PageEntity>
 
     @Query("SELECT COUNT(id) FROM pages WHERE documentOwnerId = :documentId")
@@ -126,7 +160,6 @@ interface DocumentDao {
         deletePagesByIds(pageIdsToDelete)
     }
 
-    // START: AI_MODIFIED_BLOCK
     @Transaction
     suspend fun mergeDocumentsAndDeleteOld(
         newDocument: DocumentEntity,
@@ -135,8 +168,6 @@ interface DocumentDao {
     ) {
         insertDocument(newDocument)
         insertPages(newPages)
-        // Физически не удаляем страницы, так как они скопированы. Удаляем только старые документы,
-        // а старые страницы будут удалены каскадно.
         deleteDocumentsByIds(oldDocumentIds)
     }
 
@@ -148,7 +179,7 @@ interface DocumentDao {
     ) {
         newDocumentsAndPages.forEach { (doc, page) ->
             insertDocument(doc)
-            updatePage(page) // Обновляем страницу, меняя ее владельца
+            updatePage(page)
         }
         if (deleteOriginalDocument) {
             deleteDocumentById(originalDocumentToUpdate.id)
@@ -156,5 +187,4 @@ interface DocumentDao {
             updateDocument(originalDocumentToUpdate)
         }
     }
-    // END: AI_MODIFIED_BLOCK
 }

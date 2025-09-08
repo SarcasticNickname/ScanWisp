@@ -1,6 +1,6 @@
 package com.myprojects.scanwisp.ui.state
 
-import androidx.compose.runtime.Stable
+import androidx.compose.runtime.Immutable
 
 /**
  * Представляет состояние UI для длительных операций (загрузки, экспорта и т.д.).
@@ -8,7 +8,7 @@ import androidx.compose.runtime.Stable
  * @param message Текстовое сообщение для отображения (например, "Экспорт...").
  * @param progress Прогресс выполнения от 0.0 до 1.0. Если null, будет показан неопределенный индикатор.
  */
-@Stable
+@Immutable
 data class LoadingState(
     val isBusy: Boolean = false,
     val message: String? = null,

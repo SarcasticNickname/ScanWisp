@@ -83,25 +83,21 @@ fun PageThumbnailCard(
         label = "page_border_width_animation"
     )
 
-    // START: AI_MODIFIED_BLOCK - ИСПРАВЛЕНО: Строки извлекаются здесь, в @Composable контексте
     val stateDescSelected = stringResource(R.string.state_selected)
     val stateDescNotSelected = stringResource(R.string.state_not_selected)
     val stateDescDraggable = stringResource(R.string.detail_page_card_state_draggable)
     val cdPage = stringResource(R.string.detail_page_card_cd, pageIndex + 1)
-    // END: AI_MODIFIED_BLOCK
 
     Card(
         modifier = modifier
             .aspectRatio(Dimens.A_SERIES_PAPER_ASPECT_RATIO)
             .semantics {
-                // START: AI_MODIFIED_BLOCK - ИСПРАВЛЕНО: Используются готовые переменные String
                 contentDescription = cdPage
                 role = Role.Button
 
                 val selectionState = if (isSelected) stateDescSelected else stateDescNotSelected
                 val dragState = if (showDragHandle) stateDescDraggable else ""
                 stateDescription = selectionState + dragState
-                // END: AI_MODIFIED_BLOCK
             }
             .combinedClickable(
                 interactionSource = interactionSource,
@@ -115,7 +111,13 @@ fun PageThumbnailCard(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             SubcomposeAsyncImage(
-                model = page.processedImagePath,
+                /**
+                 * ==========================================================
+                 * КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Используем thumbnailPath для быстрой загрузки.
+                 * Вместо `page.processedImagePath` теперь `page.thumbnailPath`.
+                 * ==========================================================
+                 */
+                model = page.thumbnailPath.ifBlank { page.processedImagePath }, // Фоллбэк на случай, если превью еще не создано
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

@@ -52,6 +52,7 @@ import com.myprojects.scanwisp.ui.navigation.Screen
 import com.myprojects.scanwisp.ui.screens.home.components.NativeAdListItem
 import com.myprojects.scanwisp.ui.screens.home.components.ScanWispBottomAppBar
 
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun FoldersScreen(
@@ -100,11 +101,19 @@ fun FoldersScreen(
                         onCtaClick = { viewModel.onAddFolderRequest() }
                     )
                 } else {
-                    val listItems = remember(folders, nativeAd) {
+                    /**
+                     * ==========================================================
+                     * ИЗМЕНЕНИЕ: Используем adPosition из state.
+                     * ==========================================================
+                     */
+                    val listItems = remember(folders, nativeAd, state.adPosition) {
                         val items: MutableList<Any> = folders.toMutableList()
-                        val adPosition = 1
+                        val adPosition = state.adPosition
                         if (nativeAd != null && items.size >= adPosition) {
                             items.add(adPosition, nativeAd)
+                        } else if (nativeAd != null && items.isNotEmpty()) {
+                            // Если позиция за пределами списка, добавим в конец
+                            items.add(nativeAd)
                         } else if (nativeAd != null && items.isEmpty()) {
                             items.add(nativeAd)
                         }
@@ -159,6 +168,7 @@ fun FoldersScreen(
         )
     }
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

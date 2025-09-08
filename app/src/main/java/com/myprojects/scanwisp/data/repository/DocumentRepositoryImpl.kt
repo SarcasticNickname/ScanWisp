@@ -4,15 +4,20 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.myprojects.scanwisp.data.local.DocumentDao
+import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.data.local.model.DocumentEntity
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
 import com.myprojects.scanwisp.data.local.model.PageEntity
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
+import com.myprojects.scanwisp.utils.ImageProcessor
 import com.myprojects.scanwisp.utils.SafeNamePolicy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -23,28 +28,27 @@ import javax.inject.Inject
 class DocumentRepositoryImpl @Inject constructor(
     private val dao: DocumentDao,
     @ApplicationContext private val context: Context,
-    // START: AI_MODIFIED_BLOCK
-    private val safeNamePolicy: SafeNamePolicy
-    // END: AI_MODIFIED_BLOCK
+    private val safeNamePolicy: SafeNamePolicy,
+    private val imageProcessor: ImageProcessor
 ) : DocumentRepository {
 
-    private fun deleteFileFromPath(path: String) {
+    private fun deleteFileFromPath(path: String?) {
+        if (path.isNullOrBlank() || path.isEmpty()) return
         try {
-            val uri = Uri.parse(path)
-            val file = if (uri.scheme == "file") File(uri.path!!) else File(path)
+            val file = File(path)
             if (file.exists()) {
                 file.delete()
             }
         } catch (e: Exception) {
-            Log.e("FileDeletion", "Failed to parse and delete file at path: $path", e)
+            Log.e("FileDeletion", "Failed to delete file at path: $path", e)
         }
     }
 
-    override fun getDocuments(folderId: String?): Flow<List<DocumentWithPages>> {
+    override fun getDocumentRows(folderId: String?, query: String): Flow<List<DocumentRow>> {
         return if (folderId == null) {
-            dao.getOrphanDocumentsWithPages()
+            dao.getOrphanDocumentRows(query)
         } else {
-            dao.getDocumentsWithPagesInFolder(folderId)
+            dao.getDocumentRowsInFolder(folderId, query)
         }
     }
 
@@ -54,14 +58,32 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override suspend fun createDocument(
         title: String,
-        pageData: List<Pair<String, String>>,
+        sourceUris: List<Uri>,
         folderId: String?
     ) {
-        if (pageData.isEmpty()) return
+        if (sourceUris.isEmpty()) return
+
+        val processedPageData = coroutineScope {
+            sourceUris.map { uri ->
+                async(Dispatchers.IO) {
+                    imageProcessor.processImageForStorage(uri) to uri.toString()
+                }
+            }.awaitAll()
+        }
+
+        val validPages = processedPageData.mapNotNull { (paths, sourceUri) ->
+            if (paths != null) Triple(
+                paths.processedImagePath,
+                paths.thumbnailPath,
+                sourceUri
+            ) else null
+        }
+
+        if (validPages.isEmpty()) return
 
         val documentId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
-        val coverPath = pageData.first().second
+        val coverPath = validPages.first().second
 
         val document = DocumentEntity(
             id = documentId,
@@ -71,12 +93,13 @@ class DocumentRepositoryImpl @Inject constructor(
             folderId = folderId
         )
 
-        val pages = pageData.mapIndexed { index, (originalPath, processedPath) ->
+        val pages = validPages.mapIndexed { index, (processedPath, thumbPath, sourcePath) ->
             PageEntity(
                 documentOwnerId = documentId,
                 pageNumber = index + 1,
-                originalImagePath = originalPath,
+                sourceImagePath = sourcePath,
                 processedImagePath = processedPath,
+                thumbnailPath = thumbPath,
                 position = index.toLong()
             )
         }
@@ -96,9 +119,7 @@ class DocumentRepositoryImpl @Inject constructor(
             val documentToDelete = dao.getDocumentWithPagesById(documentId).first()
             documentToDelete?.pages?.forEach { page ->
                 deleteFileFromPath(page.processedImagePath)
-                if (page.originalImagePath.isNotEmpty() && page.originalImagePath != page.processedImagePath) {
-                    deleteFileFromPath(page.originalImagePath)
-                }
+                deleteFileFromPath(page.thumbnailPath)
             }
         }
         dao.deleteDocumentById(documentId)
@@ -106,19 +127,39 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override suspend fun addPagesToDocument(
         documentId: String,
-        pageData: List<Pair<String, String>>
+        sourceUris: List<Uri>
     ) {
-        if (pageData.isEmpty()) return
+        if (sourceUris.isEmpty()) return
+
+        val processedPageData = coroutineScope {
+            sourceUris.map { uri ->
+                async(Dispatchers.IO) {
+                    imageProcessor.processImageForStorage(uri) to uri.toString()
+                }
+            }.awaitAll()
+        }
+
+        val validPages = processedPageData.mapNotNull { (paths, sourceUri) ->
+            if (paths != null) Triple(
+                paths.processedImagePath,
+                paths.thumbnailPath,
+                sourceUri
+            ) else null
+        }
+
+        if (validPages.isEmpty()) return
+
         val documentWithPages = dao.getDocumentWithPagesById(documentId).first()
         val maxPosition = documentWithPages?.pages?.maxOfOrNull { it.position } ?: -1L
 
-        val newPages = pageData.mapIndexed { index, (originalPath, processedPath) ->
+        val newPages = validPages.mapIndexed { index, (processedPath, thumbPath, sourcePath) ->
             val newPosition = maxPosition + 1 + index
             PageEntity(
                 documentOwnerId = documentId,
                 pageNumber = newPosition.toInt() + 1,
-                originalImagePath = originalPath,
+                sourceImagePath = sourcePath,
                 processedImagePath = processedPath,
+                thumbnailPath = thumbPath,
                 position = newPosition
             )
         }
@@ -132,9 +173,7 @@ class DocumentRepositoryImpl @Inject constructor(
             val pages = dao.getPagesByIds(pageIds)
             pages.forEach { page ->
                 deleteFileFromPath(page.processedImagePath)
-                if (page.originalImagePath.isNotEmpty() && page.originalImagePath != page.processedImagePath) {
-                    deleteFileFromPath(page.originalImagePath)
-                }
+                deleteFileFromPath(page.thumbnailPath)
             }
             pages
         }
@@ -145,15 +184,15 @@ class DocumentRepositoryImpl @Inject constructor(
         val document = dao.getDocumentById(documentId) ?: return
 
         var documentToUpdate = document
-        val deletedPaths = pagesToDelete.map { it.processedImagePath }.toSet()
+        val deletedThumbPaths = pagesToDelete.map { it.thumbnailPath }.toSet()
 
-        if (document.coverImagePath in deletedPaths) {
+        if (document.coverImagePath in deletedThumbPaths) {
             val allPages = dao.getAllPagesForDocument(documentId)
             val remainingPages = allPages
                 .filter { it.id !in pageIds.toSet() }
                 .sortedBy { it.position }
 
-            val newCoverPath = remainingPages.firstOrNull()?.processedImagePath ?: ""
+            val newCoverPath = remainingPages.firstOrNull()?.thumbnailPath ?: ""
             documentToUpdate = document.copy(coverImagePath = newCoverPath)
         }
 
@@ -178,18 +217,25 @@ class DocumentRepositoryImpl @Inject constructor(
     override suspend fun replacePageImage(pageId: String, newImageUri: Uri) {
         withContext(Dispatchers.IO) {
             val oldPage = dao.getPageByIdOnce(pageId) ?: return@withContext
-            if (oldPage.processedImagePath.isNotEmpty()) {
-                deleteFileFromPath(oldPage.processedImagePath)
+
+            deleteFileFromPath(oldPage.processedImagePath)
+            deleteFileFromPath(oldPage.thumbnailPath)
+
+            val newPaths = imageProcessor.processImageForStorage(newImageUri)
+
+            if (newPaths != null) {
+                val updatedPage = oldPage.copy(
+                    sourceImagePath = newImageUri.toString(),
+                    processedImagePath = newPaths.processedImagePath,
+                    thumbnailPath = newPaths.thumbnailPath
+                )
+                dao.updatePage(updatedPage)
+
+                val document = dao.getDocumentById(oldPage.documentOwnerId)
+                if (document != null && document.coverImagePath == oldPage.thumbnailPath) {
+                    updateDocumentCover(document.id, newPaths.thumbnailPath)
+                }
             }
-            if (oldPage.originalImagePath.isNotEmpty() && oldPage.originalImagePath != oldPage.processedImagePath) {
-                deleteFileFromPath(oldPage.originalImagePath)
-            }
-            val newPath = newImageUri.toString()
-            val updatedPage = oldPage.copy(
-                originalImagePath = newPath,
-                processedImagePath = newPath
-            )
-            dao.updatePage(updatedPage)
         }
     }
 
@@ -225,7 +271,6 @@ class DocumentRepositoryImpl @Inject constructor(
         }
     }
 
-    // START: AI_MODIFIED_BLOCK
     override suspend fun mergeDocuments(
         documentIds: List<String>,
         newTitle: String,
@@ -235,7 +280,7 @@ class DocumentRepositoryImpl @Inject constructor(
         val sortedDocs = docsToMerge.sortedByDescending { it.creationTimestamp }
 
         val allPages = sortedDocs.flatMap { doc ->
-            dao.getAllPagesForDocument(doc.id).sortedBy { it.position }
+            dao.getAllPagesForDocument(doc.id)
         }
 
         if (allPages.isEmpty()) return
@@ -245,7 +290,7 @@ class DocumentRepositoryImpl @Inject constructor(
             id = newDocumentId,
             title = newTitle,
             creationTimestamp = System.currentTimeMillis(),
-            coverImagePath = allPages.first().processedImagePath,
+            coverImagePath = allPages.first().thumbnailPath,
             folderId = folderId
         )
 
@@ -275,8 +320,8 @@ class DocumentRepositoryImpl @Inject constructor(
             val newDoc = DocumentEntity(
                 id = newDocId,
                 title = "$baseTitle (Часть ${index + 1})",
-                creationTimestamp = System.currentTimeMillis() + index, // ensure unique sort order
-                coverImagePath = page.processedImagePath,
+                creationTimestamp = System.currentTimeMillis() + index,
+                coverImagePath = page.thumbnailPath,
                 folderId = folderId
             )
             val updatedPage = page.copy(
@@ -289,18 +334,17 @@ class DocumentRepositoryImpl @Inject constructor(
 
         val document = dao.getDocumentById(originalDocumentId) ?: return
         var documentToUpdate = document
-        val splitPaths = pagesToSplit.map { it.processedImagePath }.toSet()
+        val splitThumbPaths = pagesToSplit.map { it.thumbnailPath }.toSet()
 
-        if (document.coverImagePath in splitPaths) {
+        if (document.coverImagePath in splitThumbPaths) {
             val allPages = dao.getAllPagesForDocument(originalDocumentId)
             val remainingPages = allPages
                 .filter { it.id !in pageIds.toSet() }
                 .sortedBy { it.position }
-            val newCoverPath = remainingPages.firstOrNull()?.processedImagePath ?: ""
+            val newCoverPath = remainingPages.firstOrNull()?.thumbnailPath ?: ""
             documentToUpdate = document.copy(coverImagePath = newCoverPath)
         }
         val remainingPageCount = dao.getPageCount(originalDocumentId) - pageIds.size
         dao.splitPagesFromDocument(newDocumentsAndPages, documentToUpdate, remainingPageCount == 0)
     }
-    // END: AI_MODIFIED_BLOCK
 }

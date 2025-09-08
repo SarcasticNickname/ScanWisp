@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,22 +41,31 @@ import com.myprojects.scanwisp.R
 
 @Composable
 fun NativeAdCard(nativeAd: NativeAd) {
+    /**
+     * ==========================================================
+     * ИЗМЕНЕНИЕ: Добавлен DisposableEffect.
+     * Гарантирует, что `nativeAd.destroy()` будет вызван, когда
+     * Composable покидает композицию, предотвращая утечки памяти.
+     * ==========================================================
+     */
+    DisposableEffect(nativeAd) {
+        onDispose {
+            nativeAd.destroy()
+        }
+    }
+
     Card(
         modifier = Modifier.aspectRatio(0.7f),
         shape = RoundedCornerShape(4.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        // NativeAdView - это контейнер из Android Views, который необходим AdMob
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                // Создаем и раздуваем макет для NativeAdView.
-                // Вместо XML мы можем собрать его программно.
                 val adView = NativeAdView(context)
                 val composeView = ComposeView(context)
                 adView.addView(composeView)
 
-                // Связываем composeView с NativeAd
                 composeView.setContent {
                     NativeAdContent(nativeAd = nativeAd, adView = adView)
                 }
