@@ -1,7 +1,6 @@
 package com.myprojects.scanwisp.domain.use_case
 
 import android.content.Context
-import android.util.Log
 import androidx.core.content.FileProvider
 import com.myprojects.scanwisp.domain.model.ExportFormat
 import com.myprojects.scanwisp.domain.model.ExportResult
@@ -13,6 +12,7 @@ import com.myprojects.scanwisp.utils.SafeNamePolicy
 import com.myprojects.scanwisp.utils.ZipExportService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -36,12 +36,10 @@ class ExportDocumentUseCase @Inject constructor(
      * @return [ExportResult], содержащий Uri и временный файл, или null в случае ошибки.
      */
     suspend operator fun invoke(
-        pageIds: List<String>,
-        displayName: String,
-        format: ExportFormat
+        pageIds: List<String>, displayName: String, format: ExportFormat
     ): ExportResult? {
         if (pageIds.isEmpty()) {
-            Log.w("ExportDocumentUseCase", "Cannot export with empty page list.")
+            Timber.w("Cannot export with empty page list.")
             return null
         }
 
@@ -51,7 +49,7 @@ class ExportDocumentUseCase @Inject constructor(
         val imagePaths = pageIds.mapNotNull { id -> pagesMap[id]?.processedImagePath }
 
         if (imagePaths.size != pageIds.size) {
-            Log.e("ExportDocumentUseCase", "Some pages not found in DB for export.")
+            Timber.e("Some pages not found in DB for export.")
             return null
         }
 
@@ -64,13 +62,15 @@ class ExportDocumentUseCase @Inject constructor(
 
             ExportFormat.PDF -> {
                 val exportProfile = settingsRepository.pdfExportProfile.first()
-                pdfExportService.exportToPdf(imagePaths, baseName, exportProfile)
+                val fitToA4 = settingsRepository.fitToA4.first() // <-- ПОЛУЧАЕМ НАСТРОЙКУ
+                pdfExportService.exportToPdf(
+                    imagePaths, baseName, exportProfile, fitToA4
+                )
             }
 
             ExportFormat.JPEG -> {
                 if (imagePaths.size > 1) {
-                    Log.w(
-                        "ExportDocumentUseCase",
+                    Timber.w(
                         "JPEG export is only supported for a single page."
                     )
                     return null
@@ -86,9 +86,7 @@ class ExportDocumentUseCase @Inject constructor(
         // 4. Если файл был успешно создан, преобразуем его в ExportResult.
         return tempFile?.let { file ->
             val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.provider",
-                file
+                context, "${context.packageName}.provider", file
             )
             ExportResult(uri, file)
         }

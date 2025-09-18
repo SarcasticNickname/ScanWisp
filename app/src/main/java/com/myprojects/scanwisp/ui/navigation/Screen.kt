@@ -24,4 +24,6 @@ sealed class Screen(val route: String) {
     object Folders : Screen("folders_screen")
 
     object Settings : Screen("settings_screen")
+
+    object Trash : Screen("trash_screen")
 }

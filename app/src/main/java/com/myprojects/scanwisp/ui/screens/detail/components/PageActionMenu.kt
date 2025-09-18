@@ -29,7 +29,10 @@ fun PageActionMenu(
                 onDismissRequest()
             },
             leadingIcon = {
-                Icon(Icons.Outlined.CollectionsBookmark, contentDescription = null)
+                Icon(
+                    Icons.Outlined.CollectionsBookmark,
+                    contentDescription = stringResource(R.string.detail_page_menu_set_as_cover)
+                )
             }
         )
         DropdownMenuItem(
@@ -39,7 +42,10 @@ fun PageActionMenu(
                 onDismissRequest()
             },
             leadingIcon = {
-                Icon(Icons.Outlined.Share, contentDescription = null)
+                Icon(
+                    Icons.Outlined.Share,
+                    contentDescription = stringResource(R.string.detail_page_menu_share_jpeg)
+                )
             }
         )
     }

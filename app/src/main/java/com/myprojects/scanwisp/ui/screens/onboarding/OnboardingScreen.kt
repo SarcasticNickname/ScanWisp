@@ -171,7 +171,7 @@ private fun OnboardingPageContent(page: OnboardingPage) {
     ) {
         Image(
             painter = page.image,
-            contentDescription = null,
+            contentDescription = stringResource(R.string.cd_onboarding_image),
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.5f)

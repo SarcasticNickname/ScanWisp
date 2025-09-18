@@ -22,5 +22,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ScanWisp"
-include(":app")
- 
+include(":app", ":baselineprofile")

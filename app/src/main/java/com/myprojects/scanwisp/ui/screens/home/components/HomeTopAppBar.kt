@@ -12,18 +12,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.MergeType
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.MergeType
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,16 +38,20 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.domain.model.ViewMode
@@ -132,21 +136,12 @@ private fun DefaultTopAppBar(
     TopAppBar(
         title = {
             if (isSearchActive) {
-                TextField(
-                    value = searchQuery,
-                    onValueChange = onQueryChange,
+                SearchField(
+                    query = searchQuery,
+                    onQueryChange = onQueryChange,
                     placeholder = { Text(stringResource(R.string.home_top_bar_search_placeholder)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    )
+                    onSearch = { keyboardController?.hide() },
+                    modifier = Modifier.fillMaxWidth()
                 )
             } else {
                 Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -154,7 +149,12 @@ private fun DefaultTopAppBar(
         },
         navigationIcon = {
             if (isSearchActive) {
-                IconButton(onClick = onSearchToggle) {
+
+                IconButton(onClick = {
+                    keyboardController?.hide()
+                    onSearchToggle()
+                }) {
+
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.home_top_bar_cd_back)
@@ -181,13 +181,13 @@ private fun DefaultTopAppBar(
                 }
                 IconButton(onClick = onSortClick) {
                     Icon(
-                        Icons.Default.Sort,
+                        Icons.AutoMirrored.Filled.Sort,
                         contentDescription = stringResource(R.string.home_top_bar_action_sort)
                     )
                 }
                 IconButton(onClick = onViewModeToggle) {
                     Icon(
-                        imageVector = if (viewMode == ViewMode.GRID) Icons.Default.List else Icons.Default.GridView,
+                        imageVector = if (viewMode == ViewMode.GRID) Icons.AutoMirrored.Filled.List else Icons.Default.GridView,
                         contentDescription = stringResource(R.string.home_top_bar_cd_toggle_view)
                     )
                 }
@@ -238,7 +238,7 @@ private fun SelectionTopAppBar(
             }
             IconButton(onClick = onMoveSelected) {
                 Icon(
-                    Icons.Outlined.DriveFileMove,
+                    Icons.AutoMirrored.Outlined.DriveFileMove,
                     contentDescription = stringResource(R.string.home_selection_bar_cd_move)
                 )
             }
@@ -265,16 +265,24 @@ private fun SelectionTopAppBar(
                             onSelectAll()
                             menuExpanded = false
                         },
-                        leadingIcon = { Icon(Icons.Default.SelectAll, null) }
-                    )
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.SelectAll,
+                                stringResource(R.string.home_top_bar_menu_select_all)
+                            )
+                        })
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_save)) },
                         onClick = {
                             onSaveSelected()
                             menuExpanded = false
                         },
-                        leadingIcon = { Icon(Icons.Outlined.FileDownload, null) }
-                    )
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.FileDownload,
+                                stringResource(R.string.action_save)
+                            )
+                        })
                     if (selectedCount > 1) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_merge)) },
@@ -282,14 +290,59 @@ private fun SelectionTopAppBar(
                                 onMergeSelected()
                                 menuExpanded = false
                             },
-                            leadingIcon = { Icon(Icons.Default.MergeType, null) }
-                        )
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.MergeType,
+                                    stringResource(R.string.action_merge)
+                                )
+                            })
                     }
                 }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    )
+}
+
+@Composable
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: @Composable (() -> Unit),
+    onSearch: () -> Unit
+) {
+    var tfv by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(query, selection = TextRange(query.length)))
+    }
+
+    LaunchedEffect(query) {
+        if (query != tfv.text) {
+            tfv = tfv.copy(text = query, selection = TextRange(query.length))
+        }
+    }
+
+    TextField(
+        value = tfv,
+        onValueChange = { newTfv ->
+            tfv = newTfv
+            if (newTfv.text != query) {
+                onQueryChange(newTfv.text)
+            }
+        },
+        placeholder = placeholder,
+        modifier = modifier,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
         )
     )
 }

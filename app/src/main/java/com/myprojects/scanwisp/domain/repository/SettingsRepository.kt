@@ -4,9 +4,7 @@ import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
 import com.myprojects.scanwisp.domain.model.ThemePreference
-// START: AI_MODIFIED_BLOCK
 import com.myprojects.scanwisp.domain.model.ViewMode
-// END: AI_MODIFIED_BLOCK
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -66,7 +64,6 @@ interface SettingsRepository {
      */
     suspend fun setOnboardingCompleted(completed: Boolean)
 
-    // START: AI_MODIFIED_BLOCK
     /**
      * Поток, предоставляющий текущий режим отображения (сетка или список).
      */
@@ -76,5 +73,24 @@ interface SettingsRepository {
      * Сохраняет новый режим отображения.
      */
     suspend fun saveViewMode(viewMode: ViewMode)
-    // END: AI_MODIFIED_BLOCK
+
+    /**
+     * Поток, указывающий, нужно ли вписывать изображения в стандартную страницу A4.
+     */
+    val fitToA4: Flow<Boolean>
+
+    /**
+     * Сохраняет настройку вписывания в A4.
+     */
+    suspend fun saveFitToA4(fit: Boolean)
+
+    /**
+     * Поток, указывающий, была ли уже показана подсказка о сортировке.
+     */
+    val sortHintShown: Flow<Boolean>
+
+    /**
+     * Сохраняет флаг о том, что подсказка о сортировке была показана.
+     */
+    suspend fun setSortHintShown(shown: Boolean)
 }

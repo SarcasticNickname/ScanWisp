@@ -1,12 +1,7 @@
 package com.myprojects.scanwisp
 
-// ==========================================================
-// НОВЫЕ ИМПОРТЫ ДЛЯ UMP SDK
-// ==========================================================
-// ==========================================================
 import android.os.Bundle
 import android.os.StrictMode
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,14 +12,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.metrics.performance.JankStats
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -32,10 +27,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.google.android.gms.ads.MobileAds
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
 import com.google.android.ump.UserMessagingPlatform
+import com.myprojects.scanwisp.consent.ConsentManager
 import com.myprojects.scanwisp.domain.model.ThemePreference
 import com.myprojects.scanwisp.ui.navigation.Screen
 import com.myprojects.scanwisp.ui.screens.detail.DocumentDetailScreen
@@ -45,13 +40,14 @@ import com.myprojects.scanwisp.ui.screens.onboarding.OnboardingScreen
 import com.myprojects.scanwisp.ui.screens.preview.PreviewScreen
 import com.myprojects.scanwisp.ui.screens.router.RouterScreen
 import com.myprojects.scanwisp.ui.screens.settings.SettingsScreen
+import com.myprojects.scanwisp.ui.screens.trash.TrashScreen
 import com.myprojects.scanwisp.ui.theme.ScanWispTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import java.util.concurrent.atomic.AtomicBoolean
-
-private const val TAG = "MainActivity"
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -59,13 +55,11 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var jankStats: JankStats? = null
 
-    // ==========================================================
-    // НОВЫЕ СВОЙСТВА ДЛЯ UMP SDK
-    // ==========================================================
-    private lateinit var consentInformation: ConsentInformation
-    private val isMobileAdsInitialized = AtomicBoolean(false)
-    // ==========================================================
+    @Inject
+    lateinit var consentManager: ConsentManager
 
+    private lateinit var consentInformation: ConsentInformation
+    // ИЗМЕНЕНИЕ: Поле isMobileAdsInitialized удалено.
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,24 +69,14 @@ class MainActivity : ComponentActivity() {
             setupStrictMode()
         }
 
-        // ==========================================================
-        // НОВЫЙ ВЫЗОВ: Запускаем процесс получения согласия.
-        // ==========================================================
-        gatherConsent()
-        // ==========================================================
-
         enableEdgeToEdge()
         setContent {
-            val themePreference by viewModel.themePreference.collectAsState(initial = ThemePreference.SYSTEM)
-            val onboardingCheckState by viewModel.onboardingCheckState.collectAsState()
+            val themePreference by viewModel.themePreference.collectAsStateWithLifecycle(
+                initialValue = ThemePreference.SYSTEM
+            )
+            val onboardingCheckState by viewModel.onboardingCheckState.collectAsStateWithLifecycle()
 
-            val useDarkTheme = when (themePreference) {
-                ThemePreference.SYSTEM -> isSystemInDarkTheme()
-                ThemePreference.LIGHT -> false
-                ThemePreference.DARK -> true
-            }
-
-            ScanWispTheme(darkTheme = useDarkTheme) {
+            ScanWispTheme(themePreference = themePreference) {
                 val navController = rememberNavController()
                 val windowSizeClass = calculateWindowSizeClass(this)
 
@@ -107,79 +91,51 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Включаем отслеживание JankStats, когда Activity активна
         jankStats?.isTrackingEnabled = true
+
+        lifecycleScope.launch {
+            gatherConsent()
+        }
     }
 
     override fun onPause() {
         super.onPause()
-        // Выключаем, когда неактивна, чтобы не тратить ресурсы
         jankStats?.isTrackingEnabled = false
     }
 
-    // ==========================================================
-    // НОВЫЕ МЕТОДЫ ДЛЯ UMP И ИНИЦИАЛИЗАЦИИ РЕКЛАМЫ
-    // ==========================================================
-
-    /**
-     * Запускает процесс сбора согласия пользователя.
-     */
     private fun gatherConsent() {
-        // Устанавливаем параметры запроса. Для отладки можно указать географию.
         val params = ConsentRequestParameters.Builder().build()
-
         consentInformation = UserMessagingPlatform.getConsentInformation(this)
 
-        // Запрашиваем актуальную информацию о согласии с серверов Google.
         consentInformation.requestConsentInfoUpdate(
             this,
             params,
             {
-                // Этот слушатель вызывается при успешном обновлении информации.
                 UserMessagingPlatform.loadAndShowConsentFormIfRequired(this) { loadAndShowError ->
                     if (loadAndShowError != null) {
-                        Log.w(
-                            TAG,
+                        Timber.w(
                             "Ошибка загрузки или показа формы согласия: ${loadAndShowError.message}"
                         )
                     }
-                    // После того как форма была показана (или не требовалась),
-                    // мы можем инициализировать SDK рекламы.
-                    initializeMobileAdsSdk()
+
+                    val canRequestAds = consentInformation.canRequestAds()
+                    consentManager.updateConsentStatus(canRequestAds)
+                    Timber.d("UMP flow finished. Can request ads: $canRequestAds")
+
+                    // ИЗМЕНЕНИЕ: Вызов initializeMobileAdsSdk() отсюда убран.
                 }
             },
             { requestConsentError ->
-                // Этот слушатель вызывается при ошибке обновления информации.
-                Log.w(
-                    TAG,
+                Timber.w(
                     "Ошибка запроса информации о согласии: ${requestConsentError.message}"
                 )
+                // В случае ошибки запроса, считаем, что рекламу показывать нельзя.
+                consentManager.updateConsentStatus(false)
             }
         )
     }
 
-    /**
-     * Инициализирует Mobile Ads SDK, если согласие было получено
-     * и SDK еще не был инициализирован.
-     */
-    private fun initializeMobileAdsSdk() {
-        // Проверяем, можно ли запрашивать рекламу и не была ли уже проведена инициализация.
-        if (consentInformation.canRequestAds() && isMobileAdsInitialized.compareAndSet(
-                false,
-                true
-            )
-        ) {
-            // Инициализируем SDK
-            MobileAds.initialize(this) {
-                Log.d(TAG, "Mobile Ads SDK initialized.")
-            }
-
-            // Запускаем отладку производительности только после основной инициализации
-            if (BuildConfig.DEBUG) {
-                setupJankStats()
-            }
-        }
-    }
+    // ИЗМЕНЕНИЕ: Метод initializeMobileAdsSdk() полностью удален.
 
     private fun setupStrictMode() {
         StrictMode.setThreadPolicy(
@@ -200,12 +156,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setupJankStats() {
-        // Запускаем в фоновом потоке, чтобы не блокировать onCreate
+        // Инициализация JankStats теперь происходит внутри удаленного метода initializeMobileAdsSdk(),
+        // но так как мы его убрали, этот вызов тоже можно будет перенести или удалить,
+        // если статистика нужна только при работе с рекламой.
+        // Пока оставим его здесь, но он не будет вызываться.
         val jankStatsScope = CoroutineScope(Dispatchers.Default)
         jankStats = JankStats.createAndTrack(window) { frameData ->
-            // Этот блок будет вызываться для каждого кадра, который был признан "тормозящим" (jank)
             if (frameData.isJank) {
-                Log.w("JankStats", "Janky frame detected: $frameData")
+                Timber.w("Janky frame detected: $frameData")
             }
         }
     }
@@ -229,10 +187,8 @@ fun AppNavHost(
     ) {
         composable(
             route = Screen.Router.route,
-            // START: AI_MODIFIED_BLOCK - Отключаем анимацию для самого первого экрана
             enterTransition = { fadeIn() },
             exitTransition = { fadeOut() }
-            // END: AI_MODIFIED_BLOCK
         ) {
             RouterScreen(
                 navController = navController,
@@ -276,6 +232,13 @@ fun AppNavHost(
             arguments = listOf(navArgument("pageId") { type = NavType.StringType })
         ) {
             PreviewScreen(navController = navController)
+        }
+
+        composable(route = Screen.Trash.route) {
+            TrashScreen(
+                navController = navController,
+                widthSizeClass = windowSizeClass
+            )
         }
     }
 }

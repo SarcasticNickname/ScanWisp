@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<defaultsMap>
+    <!-- ИЗМЕНЕНО: Старый ключ native_ad_position удален -->
+
+    <!-- НОВЫЕ КЛЮЧИ -->
+    <!-- Включает или выключает нативную рекламу в списках -->
+    <entry>
+        <key>native_ad_enabled</key>
+        <value>true</value>
+    </entry>
+    <!-- Позиция, ПОСЛЕ которой может появиться ПЕРВАЯ реклама (например, 4 означает "после 4-го документа") -->
+    <entry>
+        <key>native_ad_start_position</key>
+        <value>4</value>
+    </entry>
+    <!-- Интервал между рекламными блоками (например, 8 означает "каждые 8 документов") -->
+    <entry>
+        <key>native_ad_interval</key>
+        <value>8</value>
+    </entry>
+
+    <!-- Флаг для включения/выключения будущей функции OCR (распознавание текста). -->
+    <entry>
+        <key>ocr_feature_enabled</key>
+        <value>false</value>
+    </entry>
+</defaultsMap>

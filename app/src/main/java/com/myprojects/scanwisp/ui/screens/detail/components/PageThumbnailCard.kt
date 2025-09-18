@@ -111,14 +111,9 @@ fun PageThumbnailCard(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             SubcomposeAsyncImage(
-                /**
-                 * ==========================================================
-                 * КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Используем thumbnailPath для быстрой загрузки.
-                 * Вместо `page.processedImagePath` теперь `page.thumbnailPath`.
-                 * ==========================================================
-                 */
-                model = page.thumbnailPath.ifBlank { page.processedImagePath }, // Фоллбэк на случай, если превью еще не создано
-                contentDescription = null,
+
+                model = page.thumbnailPath.ifBlank { page.processedImagePath },
+                contentDescription = stringResource(id = R.string.cd_page_preview_thumbnail),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
                 loading = {
@@ -165,7 +160,7 @@ fun PageThumbnailCard(
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.state_selected),
                     tint = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -178,7 +173,7 @@ fun PageThumbnailCard(
             if (showDragHandle) {
                 Icon(
                     imageVector = Icons.Default.DragHandle,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.detail_page_card_state_draggable),
                     tint = Color.White.copy(alpha = 0.7f),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)

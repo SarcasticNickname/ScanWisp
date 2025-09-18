@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -32,7 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,14 +43,22 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.google.android.gms.ads.nativead.NativeAd
+import com.google.firebase.analytics.ktx.analytics
+import com.google.firebase.ktx.Firebase
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
+import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.ui.components.EmptyState
+import com.myprojects.scanwisp.ui.components.ErrorDialog
+import com.myprojects.scanwisp.ui.components.ErrorState
+import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.navigation.Screen
 import com.myprojects.scanwisp.ui.screens.home.components.NativeAdListItem
 import com.myprojects.scanwisp.ui.screens.home.components.ScanWispBottomAppBar
+import kotlinx.coroutines.flow.collectLatest
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -59,8 +67,24 @@ fun FoldersScreen(
     navController: NavController,
     viewModel: FoldersViewModel = hiltViewModel()
 ) {
-    val state by viewModel.foldersState.collectAsState()
-    val showCreateFolderDialog by viewModel.isDialogVisible.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val showCreateFolderDialog by viewModel.isDialogVisible.collectAsStateWithLifecycle()
+
+    var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
+
+    val analytics = Firebase.analytics
+
+    LaunchedEffect(key1 = true) {
+        viewModel.uiEventFlow.collectLatest { event ->
+            when (event) {
+                is UiEvent.ShowErrorDialog -> {
+                    errorToShowInDialog = event.error
+                }
+                // Можно добавить обработку других событий в будущем
+                else -> {}
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -83,73 +107,69 @@ fun FoldersScreen(
                 .padding(innerPadding)
                 .fillMaxSize()
         ) {
-            if (state.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                val folders = state.folders
-                val nativeAd = state.nativeAd
-
-                if (folders.isEmpty() && nativeAd == null) {
-                    EmptyState(
-                        modifier = Modifier.fillMaxSize(),
-                        icon = Icons.Default.CreateNewFolder,
-                        title = stringResource(R.string.folders_empty_state_title),
-                        subtitle = stringResource(R.string.folders_empty_state_subtitle),
-                        ctaText = stringResource(R.string.folders_empty_state_cta),
-                        onCtaClick = { viewModel.onAddFolderRequest() }
-                    )
-                } else {
-                    /**
-                     * ==========================================================
-                     * ИЗМЕНЕНИЕ: Используем adPosition из state.
-                     * ==========================================================
-                     */
-                    val listItems = remember(folders, nativeAd, state.adPosition) {
-                        val items: MutableList<Any> = folders.toMutableList()
-                        val adPosition = state.adPosition
-                        if (nativeAd != null && items.size >= adPosition) {
-                            items.add(adPosition, nativeAd)
-                        } else if (nativeAd != null && items.isNotEmpty()) {
-                            // Если позиция за пределами списка, добавим в конец
-                            items.add(nativeAd)
-                        } else if (nativeAd != null && items.isEmpty()) {
-                            items.add(nativeAd)
-                        }
-                        items
+            // ОБНОВЛЯЕМ ЛОГИКУ ОТОБРАЖЕНИЯ
+            when (val state = uiState) {
+                is FoldersUiState.Loading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
                     }
+                }
 
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(
-                            items = listItems,
-                            key = { item -> if (item is FolderWithDocumentCount) item.folder.id else "ad_folder_item" },
-                            contentType = { item -> if (item is FolderWithDocumentCount) "folder" else "ad" }
-                        ) { item ->
-                            when (item) {
-                                is FolderWithDocumentCount -> {
-                                    FolderItem(
-                                        folderWithCount = item,
-                                        onClick = {
-                                            navController.navigate(
-                                                Screen.Home.createRouteWithFolder(
-                                                    item.folder.id
+                is FoldersUiState.Error -> {
+                    ErrorState(
+                        error = state.error,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                is FoldersUiState.Success -> {
+                    if (state.items.isEmpty()) {
+                        EmptyState(
+                            modifier = Modifier.fillMaxSize(),
+                            icon = Icons.Default.CreateNewFolder,
+                            title = stringResource(R.string.folders_empty_state_title),
+                            subtitle = stringResource(R.string.folders_empty_state_subtitle),
+                            ctaText = stringResource(R.string.folders_empty_state_cta),
+                            onCtaClick = { viewModel.onAddFolderRequest() }
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(
+                                items = state.items,
+                                key = { index, item ->
+                                    when (item) {
+                                        is FolderWithDocumentCount -> "folder-${item.folder.id}"
+                                        is NativeAd -> "ad-$index"
+                                        else -> "other-$index"
+                                    }
+                                },
+                                contentType = { _, item -> if (item is FolderWithDocumentCount) "folder" else "ad" }
+                            ) { _, item ->
+                                when (item) {
+                                    is FolderWithDocumentCount -> {
+                                        FolderItem(
+                                            folderWithCount = item,
+                                            onClick = {
+                                                // --- АНАЛИТИКА ---
+                                                analytics.logEvent("folder_opened", null)
+                                                navController.navigate(
+                                                    Screen.Home.createRouteWithFolder(item.folder.id)
                                                 )
-                                            )
-                                        },
-                                        modifier = Modifier.animateItemPlacement()
-                                    )
-                                }
+                                            },
+                                            modifier = Modifier.animateItem()
+                                        )
+                                    }
 
-                                is NativeAd -> {
-                                    NativeAdListItem(
-                                        nativeAd = item,
-                                        modifier = Modifier.animateItemPlacement()
-                                    )
+                                    is NativeAd -> {
+                                        NativeAdListItem(
+                                            nativeAd = item,
+                                            modifier = Modifier.animateItem()
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -165,6 +185,13 @@ fun FoldersScreen(
             onConfirm = { name ->
                 viewModel.createFolder(name)
             }
+        )
+    }
+
+    errorToShowInDialog?.let { error ->
+        ErrorDialog(
+            error = error,
+            onDismiss = { errorToShowInDialog = null }
         )
     }
 }

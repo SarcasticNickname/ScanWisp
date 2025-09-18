@@ -13,12 +13,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapVert
@@ -75,7 +75,7 @@ internal fun DefaultTopAppBar(
         navigationIcon = {
             IconButton(onClick = onNavigateBack) {
                 Icon(
-                    Icons.Default.ArrowBack,
+                    Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.detail_top_bar_cd_back)
                 )
             }
@@ -89,7 +89,7 @@ internal fun DefaultTopAppBar(
             }
             IconButton(onClick = onMoveClick) {
                 Icon(
-                    Icons.Default.DriveFileMove,
+                    Icons.AutoMirrored.Filled.DriveFileMove,
                     contentDescription = stringResource(R.string.detail_top_bar_cd_move)
                 )
             }
@@ -160,7 +160,7 @@ internal fun SelectionTopAppBar(
             if (canSplit) {
                 IconButton(onClick = onSplitSelected) {
                     Icon(
-                        Icons.Default.CallSplit,
+                        Icons.AutoMirrored.Filled.CallSplit,
                         contentDescription = stringResource(R.string.detail_selection_bar_cd_split)
                     )
                 }

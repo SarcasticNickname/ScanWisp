@@ -3,14 +3,12 @@ package com.myprojects.scanwisp.di
 import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.myprojects.scanwisp.data.local.AppDatabase
 import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.model.PredefinedFolders
 import com.myprojects.scanwisp.utils.ImageCompressionService
-import com.myprojects.scanwisp.utils.ImageInfoReader
 import com.myprojects.scanwisp.utils.ImageProcessor
 import com.myprojects.scanwisp.utils.JpegExportService
 import com.myprojects.scanwisp.utils.PdfExportService
@@ -27,41 +25,14 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    private val MIGRATION_3_4 = object : Migration(3, 4) {
-        override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_documents_creationTimestamp ON documents(creationTimestamp)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_documents_folderId_creationTs ON documents(folderId, creationTimestamp)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_pages_owner_position ON pages(documentOwnerId, position)")
-        }
-    }
-
-    private val MIGRATION_4_5 = object : Migration(4, 5) {
-        override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE pages RENAME COLUMN originalImagePath TO sourceImagePath;")
-            db.execSQL("ALTER TABLE pages ADD COLUMN thumbnailPath TEXT NOT NULL DEFAULT '';")
-            /**
-             * ==========================================================
-             * ДОПОЛНЕНИЕ: Добавляем создание индекса для поиска по названию.
-             * Технически это должно быть в миграции 5->6, но для удобства
-             * объединяем с текущей, пока приложение не в релизе.
-             * ==========================================================
-             */
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_documents_title ON documents(title)")
-        }
-    }
-
-    private val MIGRATION_5_6 = object : Migration(5, 6) {
-        override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE documents ADD COLUMN deletionTimestamp INTEGER DEFAULT NULL")
-        }
-    }
-
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         val roomCallback = object : RoomDatabase.Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
+                // Этот колбэк вызывается только при первом создании БД.
+                // Он создаст предопределенную папку "Архив".
                 db.execSQL(
                     """
                     INSERT INTO folders (id, name, creationTimestamp) 
@@ -76,7 +47,6 @@ object AppModule {
             AppDatabase::class.java,
             "scanwisp_db"
         )
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .addCallback(roomCallback)
             .build()
     }
@@ -87,11 +57,6 @@ object AppModule {
         return appDatabase.documentDao()
     }
 
-    /**
-     * ==========================================================
-     * НОВЫЙ ПРОВАЙДЕР: Внедряем наш ImageProcessor.
-     * ==========================================================
-     */
     @Provides
     @Singleton
     fun provideImageProcessor(
@@ -106,10 +71,11 @@ object AppModule {
     fun providePdfExportService(
         @ApplicationContext context: Context,
         imageCompressionService: ImageCompressionService,
-        imageInfoReader: ImageInfoReader,
+        // imageInfoReader УБРАН ОТСЮДА
         crashlytics: FirebaseCrashlytics
     ): PdfExportService {
-        return PdfExportService(context, imageCompressionService, imageInfoReader, crashlytics)
+        // Вызываем новый конструктор без imageInfoReader
+        return PdfExportService(context, imageCompressionService, crashlytics)
     }
 
     @Provides

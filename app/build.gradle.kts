@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.baselineprofile)
 
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
@@ -12,7 +13,6 @@ plugins {
 val crashlyticsMappingUpload: Boolean =
     (project.findProperty("crashlyticsMappingUpload") as String?)?.toBoolean() ?: false
 
-// Файл: app/build.gradle
 
 android {
     namespace = "com.myprojects.scanwisp"
@@ -24,26 +24,14 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.myprojects.scanwisp.HiltTestRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
     signingConfigs {
-        // debug создаётся автоматически
-        // ====================================================================
-        // ДОБАВЛЕНО: Шаблон для вашей будущей релизной подписи.
-        // Когда создадите keystore.jks, раскомментируйте и заполните.
-        // ====================================================================
-        /*
-        create("release") {
-            storeFile = file("path/to/your/keystore.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
-        }
-        */
+
     }
 
     buildTypes {
@@ -65,7 +53,7 @@ android {
         }
 
         create("releaseLocal") {
-            initWith(getByName("release")) // Теперь наследуется от нашего явно определенного `release`
+            initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             isDebuggable = false
             versionNameSuffix = "-local"
@@ -73,7 +61,6 @@ android {
     }
 
     compileOptions {
-        // ИЗМЕНЕНО: Обновляем версию Java до 17
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -89,17 +76,32 @@ android {
 
     packaging {
         resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+
+            // Говорим Gradle брать первый встреченный файл, если пути дублируются.
+            pickFirsts += "META-INF/LICENSE.md"
+            pickFirsts += "META-INF/LICENSE.txt"
+            pickFirsts += "META-INF/LICENSE-notice.md"
+            pickFirsts += "META-INF/NOTICE.md"
+            pickFirsts += "META-INF/NOTICE.txt"
+            pickFirsts += "META-INF/ASL-2.0.txt"
+            pickFirsts += "META-INF/LGPL-3.0.txt"
+            pickFirsts += "META-INF/licenses/ASM"
+            pickFirsts += "META-INF/kotlin-tooling-metadata.json"
         }
     }
 
     firebaseCrashlytics {
         mappingFileUploadEnabled = crashlyticsMappingUpload
     }
+
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {
-    // ... Все ваши зависимости остаются без изменений
 
     // --- AndroidX & Jetpack Core ---
     implementation(libs.androidx.core.ktx)
@@ -120,6 +122,9 @@ dependencies {
     implementation(libs.androidx.material3.window.size.class1.android)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.metrics.performance)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.espresso.intents)
+    testImplementation(libs.junit.jupiter)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
@@ -132,8 +137,9 @@ dependencies {
 
     // --- UI Utilities ---
     implementation(libs.coil.compose)
-    implementation(libs.reorderable)
     implementation(libs.shimmer)
+    implementation("sh.calvin.reorderable:reorderable:3.0.0")
+
 
     // --- PDF & Document Processing ---
     implementation(libs.pdfbox.android)
@@ -177,11 +183,42 @@ dependencies {
 
     implementation("androidx.tracing:tracing-ktx:1.3.0-alpha02")
 
-    // --- Testing ---
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    // --- Unit тесты (src/test) ---
+    testImplementation(libs.junit) // Основной фреймворк для тестов
+    testImplementation("io.mockk:mockk:1.13.10") // Библиотека для создания моков (заглушек)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0") // Для тестирования корутин
+    testImplementation("app.cash.turbine:turbine:1.1.0") // Для удобного тестирования Flow
+
+    // --- Интеграционные и UI тесты (src/androidTest) ---
+    androidTestImplementation(libs.androidx.junit) // Расширения JUnit для Android
+    androidTestImplementation(libs.androidx.espresso.core) // Espresso для UI-тестов
+    androidTestImplementation(platform(libs.androidx.compose.bom)) // BOM для Compose
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4) // Основной инструмент для UI-тестов в Compose
+    androidTestImplementation("io.mockk:mockk-android:1.13.10") // Версия MockK для Android-тестов
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
+    androidTestImplementation("app.cash.turbine:turbine:1.1.0")
+    androidTestImplementation("androidx.work:work-testing:2.9.0")
+
+    // Hilt для тестов
+    androidTestImplementation("com.google.dagger:hilt-android-testing:2.51.1")
+    kspAndroidTest("com.google.dagger:hilt-compiler:2.51.1")
+
+    // Room для тестов
+    androidTestImplementation("androidx.room:room-testing:2.6.1")
+
+    // Для навигации в UI-тестах
+    androidTestImplementation("androidx.navigation:navigation-testing:2.7.7")
+
+    // --- Отладочные зависимости для Compose ---
     debugImplementation(libs.bundles.compose.debug)
+
+    implementation(libs.androidx.lifecycle.runtime.compose)
+
+    implementation(libs.timber)
+
+    baselineProfile(project(":baselineprofile"))
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }

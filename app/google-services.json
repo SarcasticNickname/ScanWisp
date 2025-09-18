@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "979167742615",
+    "project_id": "scanwisp",
+    "storage_bucket": "scanwisp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:979167742615:android:17fe5656ed0a9176d6f7d2",
+        "android_client_info": {
+          "package_name": "com.myprojects.scanwisp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCyCPWAa5UWn9pwqCeEk_wQA8H5JX5nyYs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

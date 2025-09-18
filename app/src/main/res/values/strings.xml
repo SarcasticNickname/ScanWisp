@@ -1,3 +1,4 @@
+<!-- Файл: app/src/main/res/values/strings.xml -->
 <resources>
     <string name="app_name">ScanWisp</string>
 
@@ -150,10 +151,14 @@
     <string name="settings_item_theme">Тема оформления</string>
     <string name="settings_item_pdf_quality">Качество экспорта PDF</string>
     <string name="settings_item_version">Версия приложения</string>
-    <string name="settings_item_version_number">1.0 (прототип)</string>
+    <string name="settings_item_version_number">1.0.0</string>
     <string name="settings_theme_system">Как в системе</string>
-    <string name="settings_theme_light">Светлая</string>
-    <string name="settings_theme_dark">Темная</string>
+    <string name="settings_theme_bordeaux_light">Бордовая (Светлая)</string>
+    <string name="settings_theme_bordeaux_dark">Бордовая (Темная)</string>
+    <string name="settings_theme_green_light">Зелёная (Светлая)</string>
+    <string name="settings_theme_green_dark">Зелёная (Темная)</string>
+    <string name="settings_theme_blue_light">Синяя (Светлая)</string>
+    <string name="settings_theme_blue_dark">Синяя (Темная)</string>
     <string name="settings_pdf_quality_small">Малый размер</string>
     <string name="settings_pdf_quality_balanced">Сбалансированный</string>
     <string name="settings_pdf_quality_high">Высокое качество</string>
@@ -162,4 +167,61 @@
     <string name="settings_pdf_quality_high_desc">Для фотографий и архивации. Наилучшее качество, большой размер файла.</string>
     <string name="settings_dialog_title_theme">Выберите тему</string>
     <string name="settings_dialog_title_pdf">Выберите качество PDF</string>
+    <string name="settings_item_fit_to_a4">Вписать в страницу A4</string>
+    <string name="settings_item_fit_to_a4_desc">Создает стандартные страницы с полями, удобно для печати.</string>
+
+
+    <!-- A11y: Content Descriptions -->
+    <string name="cd_icon_folder">Иконка папки</string>
+    <string name="cd_icon_info">Иконка информации</string>
+    <string name="cd_icon_pdf">Иконка PDF документа</string>
+    <string name="cd_icon_jpeg">Иконка изображения JPEG</string>
+    <string name="cd_icon_zip">Иконка ZIP архива</string>
+    <string name="cd_onboarding_image">Иллюстрация для шага онбординга</string>
+    <string name="cd_rename_document">Переименовать документ</string>
+    <string name="cd_move_document">Переместить документ</string>
+    <string name="cd_delete_document">Удалить документ</string>
+    <string name="cd_share_document">Поделиться документом</string>
+    <string name="cd_download_document">Скачать документ</string>
+    <string name="cd_error_image">Не удалось загрузить изображение</string>
+    <string name="cd_page_preview_thumbnail">Миниатюра страницы</string>
+
+
+    <!-- Error States -->
+    <string name="action_retry">Повторить</string>
+    <string name="error_database_title">Ошибка базы данных</string>
+    <string name="error_database_subtitle">Не удалось загрузить ваши данные. Попробуйте перезапустить приложение.</string>
+    <string name="error_filesystem_title">Ошибка файловой системы</string>
+    <string name="error_filesystem_subtitle">Не удалось прочитать или записать файл. Проверьте разрешения и свободное место.</string>
+    <string name="error_general_title">Что-то пошло не так</string>
+
+    <!-- Error Dialogs -->
+    <string name="error_dialog_title_database">Ошибка операции</string>
+    <string name="error_dialog_message_database">Не удалось сохранить или обновить данные. Пожалуйста, попробуйте еще раз.</string>
+    <string name="error_dialog_title_export">Ошибка экспорта</string>
+    <string name="error_dialog_message_export">Не удалось создать файл для экспорта. Проверьте свободное место на устройстве.</string>
+    <string name="error_dialog_title_image">Ошибка обработки изображения</string>
+    <string name="error_dialog_message_image">Не удалось обработать одно или несколько изображений. Файл может быть поврежден.</string>
+    <string name="error_dialog_title_scanner">Ошибка сканера</string>
+    <string name="error_dialog_message_scanner">Не удалось запустить сканер документов. Возможно, сервисы Google Play требуют обновления.</string>
+    <string name="error_dialog_message_general">Произошла непредвиденная ошибка. Пожалуйста, попробуйте еще раз.</string>
+
+
+    <!-- Bottom Navigation -->
+    <string name="bottom_nav_trash">Корзина</string>
+
+    <!-- Trash Screen -->
+    <string name="trash_screen_title">Корзина</string>
+    <string name="trash_top_bar_empty_trash">Очистить корзину</string>
+    <string name="trash_selection_bar_cd_restore">Восстановить выбранные</string>
+    <string name="trash_selection_bar_cd_delete_forever">Удалить навсегда</string>
+    <string name="trash_empty_state_title">Корзина пуста</string>
+
+    <string name="trash_empty_state_subtitle">Удаленные документы будут отображаться здесь. Файлы автоматически удаляются навсегда через 7 дней.</string>
+
+    <string name="trash_action_restore">Восстановить</string>
+    <string name="trash_action_delete_forever">Удалить навсегда</string>
+    <string name="confirmation_dialog_ok">OK</string>
+    <string name="error_dialog_go_to_trash">Перейти в корзину</string>
+
 </resources>

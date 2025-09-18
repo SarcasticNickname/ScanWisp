@@ -3,170 +3,181 @@ package com.myprojects.scanwisp.utils
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Rect
-import android.graphics.pdf.PdfDocument
-import android.net.Uri
-import android.util.Log
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
+import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
+import java.io.FileInputStream
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.min
-import kotlin.math.roundToInt
+import kotlin.math.max
 
-/**
- * ==========================================================
- * РЕФАКТОРИНГ: Сервис переписан на нативный android.graphics.pdf.PdfDocument.
- * Это делает экспорт быстрее, легче по потреблению RAM и уменьшает размер APK,
- * так как больше не используется тяжелая библиотека PDFBox.
- * ==========================================================
- *
- * Логика умного выбора размера страницы сохранена:
- * - Если скан меньше А4, страница PDF создается точно по размеру контента.
- * - Если скан больше А4, он пропорционально вписывается в стандартную страницу А4.
- */
+private const val HIGH_QUALITY_DPI = 300
+private const val BALANCED_QUALITY_DPI = 200
+private const val JPEG_COMPRESSION_QUALITY = 85
+
 @Singleton
 class PdfExportService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val imageCompressionService: ImageCompressionService,
-    private val imageInfoReader: ImageInfoReader,
     private val crashlytics: FirebaseCrashlytics
 ) {
 
-    // Размеры А4 в пунктах (1/72 дюйма)
-    private val a4WidthPoints = 595
-    private val a4HeightPoints = 842
-    private val marginPoints = 12
-
-    // Плотность пикселей для перевода пикселей в физические размеры (точки).
-    private val referenceDpi = 300f
-
-    /**
-     * Создаёт PDF из набора путей к изображениям с учётом профиля качества.
-     * Возвращает файл в кэше либо null в случае ошибки.
-     */
     suspend fun exportToPdf(
         pageImagePaths: List<String>,
         title: String,
-        profile: PdfExportProfile
+        profile: PdfExportProfile,
+        fitToA4: Boolean
     ): File? = withContext(Dispatchers.IO) {
         if (pageImagePaths.isEmpty()) return@withContext null
 
-        val pdfDocument = PdfDocument()
         val policy = SafeNamePolicy(context)
         val dir = File(context.cacheDir, "pdfs").apply { mkdirs() }
         val safeTitle = policy.exportBaseNameFromTitle(title)
         val outputFile = policy.uniqueFile(dir, safeTitle, ".pdf")
 
-        try {
-            pageImagePaths.forEachIndexed { index, path ->
-                val uri = Uri.parse(path)
-                val info = imageInfoReader.readInfo(uri)
+        PDDocument().use { document ->
+            try {
+                pageImagePaths.forEach { path ->
+                    // ИЗМЕНЕНИЕ: Теперь передаем fitToA4 для умного сжатия
+                    val imageBytes = getImageBytesForProfile(path, profile, fitToA4)
+                    val pdImage = PDImageXObject.createFromByteArray(document, imageBytes, null)
 
-                // 1. Определяем размер страницы
-                val imgWidthPt = (info.widthPx * 72f / referenceDpi).roundToInt()
-                val imgHeightPt = (info.heightPx * 72f / referenceDpi).roundToInt()
+                    if (fitToA4) {
+                        // Логика для заполнения страницы A4
+                        val page = PDPage(PDRectangle.A4)
+                        document.addPage(page)
+                        PDPageContentStream(document, page).use { contentStream ->
+                            val pageBounds = page.mediaBox
+                            val scale = max(
+                                pageBounds.width / pdImage.width,
+                                pageBounds.height / pdImage.height
+                            )
+                            val scaledWidth = pdImage.width * scale
+                            val scaledHeight = pdImage.height * scale
+                            val startX = (pageBounds.width - scaledWidth) / 2
+                            val startY = (pageBounds.height - scaledHeight) / 2
+                            contentStream.saveGraphicsState()
+                            contentStream.addRect(0f, 0f, pageBounds.width, pageBounds.height)
+                            contentStream.clip()
+                            contentStream.drawImage(
+                                pdImage,
+                                startX,
+                                startY,
+                                scaledWidth,
+                                scaledHeight
+                            )
+                            contentStream.restoreGraphicsState()
+                        }
+                    } else {
+                        // Логика для страницы по размеру контента
+                        val page =
+                            PDPage(PDRectangle(pdImage.width.toFloat(), pdImage.height.toFloat()))
+                        document.addPage(page)
+                        PDPageContentStream(document, page).use { contentStream ->
+                            contentStream.drawImage(
+                                pdImage,
+                                0f,
+                                0f,
+                                pdImage.width.toFloat(),
+                                pdImage.height.toFloat()
+                            )
+                        }
+                    }
+                }
+                document.save(outputFile)
+                return@withContext outputFile
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to create PDF using PDFBox")
+                crashlytics.recordException(e)
+                outputFile.delete()
+                return@withContext null
+            }
+        }
+    }
 
-                val fitsInA4 = imgWidthPt <= a4WidthPoints && imgHeightPt <= a4HeightPoints
-                val useCropToContent = fitsInA4
-
-                val (pageWidth, pageHeight) = if (useCropToContent) {
-                    imgWidthPt to imgHeightPt
-                } else {
-                    a4WidthPoints to a4HeightPoints
+    private suspend fun getImageBytesForProfile(
+        path: String,
+        profile: PdfExportProfile,
+        fitToA4: Boolean
+    ): ByteArray {
+        FileInputStream(File(path)).use { inputStream ->
+            return when (profile) {
+                PdfExportProfile.SMALL -> {
+                    imageCompressionService.processImageStream(inputStream)
                 }
 
-                // 2. Создаем страницу
-                val pageInfo =
-                    PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
-                val page = pdfDocument.startPage(pageInfo)
-                val canvas = page.canvas
+                PdfExportProfile.BALANCED -> {
+                    // Уменьшаем до 200 DPI для А4 или до макс. стороны 2400px
+                    downsampleImage(inputStream, BALANCED_QUALITY_DPI, 2400, fitToA4)
+                }
 
-                // 3. Загружаем и рисуем Bitmap
-                drawBitmapOnCanvas(canvas, uri, profile, useCropToContent)
-
-                pdfDocument.finishPage(page)
+                PdfExportProfile.HIGH -> {
+                    // Уменьшаем до 300 DPI для А4 или до макс. стороны 3200px
+                    downsampleImage(inputStream, HIGH_QUALITY_DPI, 3200, fitToA4)
+                }
             }
-
-            // 4. Сохраняем документ в файл
-            FileOutputStream(outputFile).use { fos ->
-                pdfDocument.writeTo(fos)
-            }
-
-            return@withContext outputFile
-        } catch (e: Exception) {
-            Log.e("PdfExportService", "Failed to create PDF", e)
-            crashlytics.recordException(e)
-            outputFile.delete() // Удаляем частично созданный файл в случае ошибки
-            return@withContext null
-        } finally {
-            pdfDocument.close()
         }
     }
 
-    /**
-     * Загружает, при необходимости сжимает, и рисует Bitmap на Canvas.
-     */
-    private fun drawBitmapOnCanvas(
-        canvas: Canvas,
-        uri: Uri,
-        profile: PdfExportProfile,
-        isCroppedToContent: Boolean
-    ) {
-        var bitmap: Bitmap? = null
-        try {
-            // Загружаем Bitmap с учетом профиля
-            bitmap = loadBitmapForProfile(uri, profile)
+    private fun downsampleImage(
+        inputStream: InputStream,
+        targetDpi: Int,
+        maxSidePx: Int,
+        fitToA4: Boolean
+    ): ByteArray {
+        val imageBytes = inputStream.readBytes()
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
 
-            val margin = if (isCroppedToContent) 0 else marginPoints
-            val canvasWidth = canvas.width - 2 * margin
-            val canvasHeight = canvas.height - 2 * margin
-
-            // Масштабируем Bitmap, чтобы он вписался в доступную область
-            val scale = min(
-                canvasWidth.toFloat() / bitmap.width,
-                canvasHeight.toFloat() / bitmap.height
-            )
-            val drawWidth = (bitmap.width * scale).roundToInt()
-            val drawHeight = (bitmap.height * scale).roundToInt()
-
-            // Центрируем изображение
-            val left = margin + (canvasWidth - drawWidth) / 2
-            val top = margin + (canvasHeight - drawHeight) / 2
-            val destRect = Rect(left, top, left + drawWidth, top + drawHeight)
-
-            canvas.drawBitmap(bitmap, null, destRect, null)
-        } finally {
-            bitmap?.recycle()
+        val (targetWidth, targetHeight) = if (fitToA4) {
+            // A4 is 8.27 x 11.69 inches
+            ((8.27 * targetDpi).toInt() to (11.69 * targetDpi).toInt())
+        } else {
+            (maxSidePx to maxSidePx)
         }
+
+        options.inSampleSize = calculateInSampleSize(options, targetWidth, targetHeight)
+        options.inJustDecodeBounds = false
+
+        val downsampledBitmap =
+            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options)
+
+        val outputStream = ByteArrayOutputStream()
+        downsampledBitmap.compress(
+            Bitmap.CompressFormat.JPEG,
+            JPEG_COMPRESSION_QUALITY,
+            outputStream
+        )
+        downsampledBitmap.recycle()
+
+        return outputStream.toByteArray()
     }
 
-    /**
-     * Загружает Bitmap из URI, применяя сжатие в соответствии с профилем.
-     */
-    private fun loadBitmapForProfile(uri: Uri, profile: PdfExportProfile): Bitmap {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            // Для HIGH профиля и JPEG-файлов мы могли бы попытаться использовать оригинал,
-            // но для простоты и консистентности будем всегда декодировать.
-            // ImageCompressionService уже оптимизирован.
-            if (profile == PdfExportProfile.HIGH) {
-                return BitmapFactory.decodeStream(inputStream)
-                    ?: throw IOException("BitmapFactory failed to decode stream for URI: $uri")
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
+        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight: Int = height / 2
+            val halfWidth: Int = width / 2
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 2
             }
-
-            // Для SMALL и BALANCED используем наш сервис сжатия
-            val compressedBytes = imageCompressionService.processImageStream(inputStream, profile)
-            return BitmapFactory.decodeByteArray(compressedBytes, 0, compressedBytes.size)
-                ?: throw IOException("BitmapFactory failed to decode compressed byte array.")
-        } ?: throw IOException("ContentResolver returned null InputStream for URI: $uri")
+        }
+        return inSampleSize
     }
-
-    // Класс IOException для полноты картины
-    class IOException(message: String) : Exception(message)
 }

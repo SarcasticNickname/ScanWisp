@@ -27,7 +27,7 @@ data class DocumentRow(
 @Dao
 interface DocumentDao {
 
-    // --- Операции с Папками ---
+    // --- Операции с Папками (без изменений) ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolder(folder: FolderEntity)
@@ -60,29 +60,82 @@ interface DocumentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: DocumentEntity)
 
-    @Query(
-        """
-        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
-               (SELECT COUNT(p.id) FROM pages p WHERE p.documentOwnerId = d.id) as pageCount
-        FROM documents d
-        WHERE d.folderId = :folderId AND d.title LIKE '%' || :query || '%' COLLATE NOCASE
-        AND d.deletionTimestamp IS NULL
-        ORDER BY d.creationTimestamp DESC
-    """
-    )
-    fun getDocumentRowsInFolder(folderId: String, query: String): Flow<List<DocumentRow>>
 
+    // НОВЫЙ МЕТОД: Для получения документов БЕЗ поискового запроса
+    @Transaction
+    @Query("""
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
+               IFNULL(p.pageCount, 0) AS pageCount
+        FROM documents d
+        LEFT JOIN (
+            SELECT documentOwnerId, COUNT(id) AS pageCount
+            FROM pages GROUP BY documentOwnerId
+        ) p ON d.id = p.documentOwnerId
+        WHERE
+            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL)) AND
+            d.deletionTimestamp IS NULL
+        ORDER BY
+            CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'ASC'  THEN d.creationTimestamp END ASC,
+            CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'DESC' THEN d.creationTimestamp END DESC,
+            CASE WHEN :sortBy = 'NAME' AND :sortOrder = 'ASC'  THEN d.title END COLLATE NOCASE ASC,
+            CASE WHEN :sortBy = 'NAME' AND :sortOrder = 'DESC' THEN d.title END COLLATE NOCASE DESC
+    """)
+    fun getDocumentRowsWithoutSearch(
+        folderId: String?,
+        sortBy: String,
+        sortOrder: String
+    ): Flow<List<DocumentRow>>
+
+    // НОВЫЙ МЕТОД: Для получения документов С поисковым запросом FTS
+    @Transaction
+    @Query("""
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
+               IFNULL(p.pageCount, 0) AS pageCount
+        FROM documents_fts fts
+        JOIN documents d ON d.pk = fts.rowid
+        LEFT JOIN (
+            SELECT documentOwnerId, COUNT(id) AS pageCount
+            FROM pages GROUP BY documentOwnerId
+        ) p ON d.id = p.documentOwnerId
+        WHERE
+            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL)) AND
+            d.deletionTimestamp IS NULL AND
+            documents_fts MATCH :ftsQuery
+        ORDER BY
+            CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'ASC'  THEN d.creationTimestamp END ASC,
+            CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'DESC' THEN d.creationTimestamp END DESC,
+            CASE WHEN :sortBy = 'NAME' AND :sortOrder = 'ASC'  THEN d.title END COLLATE NOCASE ASC,
+            CASE WHEN :sortBy = 'NAME' AND :sortOrder = 'DESC' THEN d.title END COLLATE NOCASE DESC
+    """)
+    fun getDocumentRowsWithSearch(
+        folderId: String?,
+        ftsQuery: String,
+        sortBy: String,
+        sortOrder: String
+    ): Flow<List<DocumentRow>>
+
+    @Transaction
     @Query(
         """
         SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
-               (SELECT COUNT(p.id) FROM pages p WHERE p.documentOwnerId = d.id) as pageCount
+               IFNULL(p.pageCount, 0) as pageCount
         FROM documents d
-        WHERE d.folderId IS NULL AND d.title LIKE '%' || :query || '%' COLLATE NOCASE
-        AND d.deletionTimestamp IS NULL
-        ORDER BY d.creationTimestamp DESC
+        LEFT JOIN (
+            SELECT documentOwnerId, COUNT(id) as pageCount
+            FROM pages
+            GROUP BY documentOwnerId
+        ) p ON d.id = p.documentOwnerId
+        WHERE d.deletionTimestamp IS NOT NULL
+        ORDER BY d.deletionTimestamp DESC
     """
     )
-    fun getOrphanDocumentRows(query: String): Flow<List<DocumentRow>>
+    fun getDeletedDocumentRows(): Flow<List<DocumentRow>>
+
+    @Query("UPDATE documents SET deletionTimestamp = NULL, folderId = :folderId WHERE id = :documentId")
+    suspend fun restoreDocumentToFolder(documentId: String, folderId: String)
+
+    @Query("UPDATE documents SET deletionTimestamp = NULL, folderId = NULL WHERE id = :documentId")
+    suspend fun restoreDocumentToRoot(documentId: String)
 
     @Transaction
     @Query("SELECT * FROM documents WHERE id = :documentId AND deletionTimestamp IS NULL")

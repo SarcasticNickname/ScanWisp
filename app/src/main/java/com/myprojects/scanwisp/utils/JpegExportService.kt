@@ -1,12 +1,12 @@
 package com.myprojects.scanwisp.utils
 
 import android.content.Context
-import android.net.Uri
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
+import java.io.FileInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,11 +19,6 @@ class JpegExportService @Inject constructor(
 ) {
     /**
      * Копирует исходный файл изображения в кэш приложения.
-     * Это необходимо для получения content:// Uri через FileProvider для безопасной передачи.
-     *
-     * @param sourcePath Абсолютный путь к исходному файлу изображения.
-     * @param newFileName Имя для файла в кэше (без расширения .jpg).
-     * @return [File] для скопированного файла или null в случае ошибки.
      */
     suspend fun copyToCache(sourcePath: String, newFileName: String): File? =
         withContext(Dispatchers.IO) {
@@ -32,17 +27,17 @@ class JpegExportService @Inject constructor(
             val destFile = policy.uniqueFile(jpegDir, policy.sanitizeBase(newFileName), ".jpg")
 
             try {
-// START: AI_MODIFIED_BLOCK
-                val uri = Uri.parse(sourcePath)
-                context.contentResolver.openInputStream(uri)?.use { inStream ->
+                // ИЗМЕНЕНИЕ: Мы больше не используем ContentResolver.
+                // Мы работаем напрямую с файлом, так как у нас есть его путь.
+                val sourceFile = File(sourcePath)
+                FileInputStream(sourceFile).use { inStream ->
                     destFile.outputStream().use { outStream ->
                         inStream.copyTo(outStream)
                     }
-                } ?: throw Exception("ContentResolver returned null InputStream for $uri")
+                }
                 return@withContext destFile
-// END: AI_MODIFIED_BLOCK
             } catch (e: Exception) {
-                Log.e("JpegExportService", "Failed to copy JPEG to cache", e)
+                Timber.e(e, "Failed to copy JPEG to cache")
                 destFile.delete()
                 return@withContext null
             }

@@ -51,6 +51,7 @@ import coil.compose.SubcomposeAsyncImage
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.ui.components.ShimmeringCard
+import com.myprojects.scanwisp.ui.model.UiAction
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -63,11 +64,7 @@ fun DocumentCard(
     isSelectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onRenameRequest: () -> Unit,
-    onMoveRequest: () -> Unit,
-    onShareRequest: () -> Unit,
-    onDownloadRequest: () -> Unit,
-    onDeleteRequest: () -> Unit,
+    actions: List<UiAction>,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -84,7 +81,12 @@ fun DocumentCard(
         label = "border_width_animation"
     )
 
-    val formattedDate = formatDate(documentRow.creationTimestamp)
+    val formattedDate = remember(documentRow.creationTimestamp) {
+        val date = Date(documentRow.creationTimestamp)
+        val format = SimpleDateFormat("dd MMM", Locale("ru"))
+        format.format(date)
+    }
+
     val pagesCountText =
         stringResource(R.string.document_card_pages_count_format, documentRow.pageCount)
     val fullContentDescription = "${documentRow.title}, $pagesCountText, $formattedDate"
@@ -122,7 +124,7 @@ fun DocumentCard(
             ) {
                 SubcomposeAsyncImage(
                     model = documentRow.coverImagePath,
-                    contentDescription = null,
+                    contentDescription = stringResource(id = R.string.cd_page_preview_thumbnail),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                     loading = { ShimmeringCard(cornerRadius = 0.dp) },
@@ -138,7 +140,7 @@ fun DocumentCard(
                 if (isSelected) {
                     Icon(
                         imageVector = Icons.Filled.CheckCircle,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.state_selected),
                         tint = Color.White,
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -176,14 +178,10 @@ fun DocumentCard(
                             )
                         )
                     }
-                    DocumentActionMenu(
+                    ActionsMenu(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false },
-                        onRenameClick = onRenameRequest,
-                        onMoveClick = onMoveRequest,
-                        onDeleteClick = onDeleteRequest,
-                        onShareClick = onShareRequest,
-                        onDownloadClick = onDownloadRequest
+                        actions = actions
                     )
                 }
             }
@@ -196,10 +194,4 @@ fun DocumentCard(
             )
         }
     }
-}
-
-private fun formatDate(timestamp: Long): String {
-    val date = Date(timestamp)
-    val format = SimpleDateFormat("dd MMM", Locale("ru"))
-    return format.format(date)
 }

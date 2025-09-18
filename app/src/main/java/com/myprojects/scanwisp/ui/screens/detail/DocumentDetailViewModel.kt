@@ -1,27 +1,31 @@
 package com.myprojects.scanwisp.ui.screens.detail
 
-import android.content.Context
+import android.app.Activity
 import android.net.Uri
-import android.util.Log
+import androidx.core.os.bundleOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.ktx.logEvent
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.myprojects.scanwisp.R
+import com.myprojects.scanwisp.core.storage.StorageService
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
+import com.myprojects.scanwisp.data.local.model.PageEntity
+import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ExportFormat
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
+import com.myprojects.scanwisp.domain.repository.SettingsRepository
+import com.myprojects.scanwisp.domain.repository.StringProvider
 import com.myprojects.scanwisp.domain.use_case.SplitPagesUseCase
 import com.myprojects.scanwisp.ui.delegate.ExportManagerDelegate
 import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.screens.home.ExportAction
-import com.myprojects.scanwisp.ui.screens.home.ShareDialogState
 import com.myprojects.scanwisp.ui.state.LoadingState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,33 +35,72 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
 class DocumentDetailViewModel @Inject constructor(
     private val repository: DocumentRepository,
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
+    private val settingsRepository: SettingsRepository,
     private val splitPagesUseCase: SplitPagesUseCase,
-    // ИЗМЕНЕНИЕ: Внедряем наш новый делегат
     private val exportManager: ExportManagerDelegate,
-    @ApplicationContext private val context: Context,
+    private val stringProvider: StringProvider,
     private val analytics: FirebaseAnalytics,
-    private val crashlytics: FirebaseCrashlytics
+    private val crashlytics: FirebaseCrashlytics,
+    private val storageService: StorageService
 ) : ViewModel() {
 
     private val documentId: String = checkNotNull(savedStateHandle["documentId"])
+    private val selectedPageIdsKey = "detailSelectedPageIds"
 
-    private val _documentState = MutableStateFlow<DocumentWithPages?>(null)
-    val documentState = _documentState.asStateFlow()
+    private val _pendingDeletionPageIds = MutableStateFlow<Set<String>>(emptySet())
+    private val _reorderedPages = MutableStateFlow<List<PageEntity>?>(null)
 
-    private val _selectedPageIds = MutableStateFlow<Set<String>>(emptySet())
-    val selectedPageIds = _selectedPageIds.asStateFlow()
+    private val documentFlow: StateFlow<DocumentWithPages?> = repository.getDocumentById(documentId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
+
+    val uiState: StateFlow<DocumentDetailUiState> = combine(
+        documentFlow,
+        _pendingDeletionPageIds,
+    ) { document, pendingIds ->
+        if (document == null) {
+            return@combine DocumentDetailUiState.Loading
+        }
+        val processedDocument = document.copy(
+            pages = document.pages
+                .filter { it.id !in pendingIds }
+                .sortedBy { it.position }
+        )
+        DocumentDetailUiState.Success(processedDocument)
+    }
+        .catch { e ->
+            Timber.e(e, "Error loading document")
+            crashlytics.recordException(e)
+            emit(DocumentDetailUiState.Error(AppError.LoadDataError))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = DocumentDetailUiState.Loading
+        )
+
+    val selectedPageIds =
+        savedStateHandle.getStateFlow(key = selectedPageIdsKey, initialValue = emptySet<String>())
 
     private val _allFolders = MutableStateFlow<List<FolderEntity>>(emptyList())
     val allFolders = _allFolders.asStateFlow()
@@ -65,7 +108,7 @@ class DocumentDetailViewModel @Inject constructor(
     private val _isMoveDialogVisible = MutableStateFlow(false)
     val isMoveDialogVisible = _isMoveDialogVisible.asStateFlow()
 
-    val isSelectionModeActive: StateFlow<Boolean> = _selectedPageIds
+    val isSelectionModeActive: StateFlow<Boolean> = selectedPageIds
         .map { it.isNotEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -75,12 +118,10 @@ class DocumentDetailViewModel @Inject constructor(
     private val _uiEventFlow = MutableSharedFlow<UiEvent>()
     val uiEventFlow = _uiEventFlow.asSharedFlow()
 
-
     private val _loadingState = MutableStateFlow(LoadingState())
     val loadingState = _loadingState.asStateFlow()
 
-    // ИЗМЕНЕНИЕ: Состояние диалога берем из делегата
-    val shareDialogState: StateFlow<ShareDialogState> = exportManager.shareDialogState
+    val shareDialogState: StateFlow<ExportManagerDelegate.ShareDialogState> = exportManager.shareDialogState
 
     private val _isRenameDialogVisible = MutableStateFlow(false)
     val isRenameDialogVisible = _isRenameDialogVisible.asStateFlow()
@@ -90,28 +131,15 @@ class DocumentDetailViewModel @Inject constructor(
 
     private var deletePagesJob: Job? = null
     private val pagesPendingDeletion = mutableListOf<String>()
-    private val _pendingDeletionPageIds = MutableStateFlow<Set<String>>(emptySet())
-
 
     init {
-        // ... (init блок остается без изменений)
         crashlytics.setCustomKey("current_screen", "document_detail")
         crashlytics.setCustomKey("document_id", documentId)
 
-        viewModelScope.launch {
-            combine(
-                repository.getDocumentById(documentId),
-                _pendingDeletionPageIds
-            ) { document, pendingIds ->
-                document?.copy(
-                    pages = document.pages
-                        .filter { it.id !in pendingIds }
-                        .sortedBy { it.position }
-                )
-            }.collect { documentWithPages ->
-                _documentState.value = documentWithPages
-            }
-        }
+        selectedPageIds
+            .onEach { ids -> savedStateHandle[selectedPageIdsKey] = ids }
+            .launchIn(viewModelScope)
+
         viewModelScope.launch {
             repository.getAllFolders().collect { folders ->
                 _allFolders.value = folders
@@ -124,52 +152,64 @@ class DocumentDetailViewModel @Inject constructor(
         super.onCleared()
     }
 
-    // ... (splitSelectedPages, onMoveRequest и другие методы остаются)
+    fun onAddPagesClicked(activity: Activity) {
+        viewModelScope.launch {
+            _loadingState.update { it.copy(isBusy = true, message = "Подготовка сканера...") }
+
+            val scannerOptions = GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(10)
+                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build()
+            val scanner = GmsDocumentScanning.getClient(scannerOptions)
+
+            scanner.getStartScanIntent(activity)
+                .addOnSuccessListener { intentSender ->
+                    viewModelScope.launch {
+                        _loadingState.update { it.copy(isBusy = false) }
+                        _uiEventFlow.emit(UiEvent.LaunchScanner(intentSender))
+                    }
+                }
+                .addOnFailureListener { e ->
+                    viewModelScope.launch {
+                        crashlytics.recordException(e)
+                        _loadingState.update { it.copy(isBusy = false) }
+                        _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.ScannerLaunchError))
+                    }
+                }
+        }
+    }
+
     fun splitSelectedPages() {
         viewModelScope.launch {
-            val pageIds = _selectedPageIds.value.toList()
-            val originalDocState = _documentState.value ?: return@launch
+            val pageIds = selectedPageIds.value.toList()
+            val originalDoc = documentFlow.value ?: return@launch
 
-            crashlytics.log("Splitting ${pageIds.size} pages from document ${originalDocState.document.id}")
-            crashlytics.setCustomKey("operation", "split_pages")
-            crashlytics.setCustomKey("split_page_count", pageIds.size)
-
+            crashlytics.log("Splitting ${pageIds.size} pages from document ${originalDoc.document.id}")
             _loadingState.update { it.copy(isBusy = true, message = "Разъединение...") }
             try {
-                // Вызываем UseCase, который содержит всю бизнес-логику и валидацию
                 val newDocsCount = splitPagesUseCase(documentId, pageIds)
-
-                analytics.logEvent("pages_split") {
-                    param("split_count", newDocsCount.toLong())
-                }
+                analytics.logEvent("pages_split", bundleOf("split_count" to newDocsCount.toLong()))
                 _uiEventFlow.emit(UiEvent.ShowSnackbar("$newDocsCount страниц(ы) выделены в новые документы"))
-
-                // Проверяем, не стал ли исходный документ пустым
-                if (pageIds.size == originalDocState.pages.size) {
+                if (pageIds.size == originalDoc.pages.size) {
                     _uiEventFlow.emit(UiEvent.NavigateBack)
                 }
-            } catch (e: IllegalArgumentException) {
-                // Обрабатываем ошибку валидации, которую может выбросить UseCase
-                _uiEventFlow.emit(UiEvent.ShowSnackbar(e.message ?: "Некорректный выбор страниц"))
             } catch (e: Exception) {
-                Log.e("DetailViewModel", "Failed to split pages", e)
+                Timber.e(e, "Failed to split pages")
                 crashlytics.recordException(e)
-                _uiEventFlow.emit(
-                    UiEvent.ShowSnackbar(
-                        "Ошибка при разъединении страниц",
-                        isError = true
-                    )
-                )
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             } finally {
                 clearSelection()
                 _loadingState.update { it.copy(isBusy = false) }
-                crashlytics.setCustomKey("operation", "none")
             }
         }
     }
 
     fun onMoveRequest() {
-        _isMoveDialogVisible.value = true
+        if (documentFlow.value != null) {
+            _isMoveDialogVisible.value = true
+        }
     }
 
     fun onMoveDialogDismiss() {
@@ -178,17 +218,25 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun onMoveConfirm(folderId: String?) {
         viewModelScope.launch {
-            repository.moveDocumentsToFolder(listOf(documentId), folderId)
-            _isMoveDialogVisible.value = false
-            _uiEventFlow.emit(UiEvent.ShowSnackbar("Документ перемещен"))
-            _uiEventFlow.emit(UiEvent.NavigateBack)
+            try {
+                analytics.logEvent("document_moved", bundleOf("count" to 1L))
+                repository.moveDocumentsToFolder(listOf(documentId), folderId)
+                _isMoveDialogVisible.value = false
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Документ перемещен"))
+                _uiEventFlow.emit(UiEvent.NavigateBack)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to move document")
+                crashlytics.recordException(e)
+                _isMoveDialogVisible.value = false
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
         }
     }
 
     fun onShareAllPagesRequest() {
-        val allPageIds = _documentState.value?.pages?.map { it.id } ?: emptySet()
+        val allPageIds = documentFlow.value?.pages?.map { it.id }?.toSet() ?: emptySet()
         if (allPageIds.isNotEmpty()) {
-            _selectedPageIds.value = allPageIds as Set<String>
+            savedStateHandle[selectedPageIdsKey] = allPageIds
             onShareRequest()
         } else {
             viewModelScope.launch {
@@ -207,24 +255,30 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun setPageAsCover(pageId: String) {
         viewModelScope.launch {
-            val page = _documentState.value?.pages?.find { it.id == pageId }
-            if (page != null) {
-                repository.updateDocumentCover(documentId, page.thumbnailPath)
-                analytics.logEvent("cover_changed", null)
-                _uiEventFlow.emit(UiEvent.ShowSnackbar("Обложка документа обновлена"))
+            try {
+                val page = documentFlow.value?.pages?.find { it.id == pageId }
+                if (page != null) {
+                    repository.updateDocumentCover(documentId, page.thumbnailPath)
+                    analytics.logEvent("cover_changed", null)
+                    _uiEventFlow.emit(UiEvent.ShowSnackbar("Обложка документа обновлена"))
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to set page as cover")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }
     }
 
-    // ИЗМЕНЕНИЕ: Метод упрощен и делегирует вызов менеджеру
     fun shareSinglePage(pageId: String) {
-        val documentTitle = _documentState.value?.document?.title ?: "Страница"
+        val documentTitle = documentFlow.value?.document?.title ?: "Страница"
         exportManager.requestExportForPages(listOf(pageId), documentTitle, ExportAction.SHARE)
     }
 
-    // ... (onRenameRequest и далее без изменений)
     fun onRenameRequest() {
-        _isRenameDialogVisible.value = true
+        if (documentFlow.value != null) {
+            _isRenameDialogVisible.value = true
+        }
     }
 
     fun onRenameDialogDismiss() {
@@ -234,7 +288,14 @@ class DocumentDetailViewModel @Inject constructor(
     fun onRenameConfirm(newTitle: String) {
         if (newTitle.isNotBlank()) {
             viewModelScope.launch {
-                repository.renameDocument(documentId, newTitle)
+                try {
+                    analytics.logEvent("document_renamed", null)
+                    repository.renameDocument(documentId, newTitle)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to rename document")
+                    crashlytics.recordException(e)
+                    _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+                }
             }
         }
         _isRenameDialogVisible.value = false
@@ -242,111 +303,164 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun onPageClick(pageId: String) {
         if (isSelectionModeActive.value) {
-            _selectedPageIds.update { currentIds ->
-                if (pageId in currentIds) currentIds - pageId else currentIds + pageId
-            }
+            val currentIds = selectedPageIds.value
+            val newIds = if (pageId in currentIds) currentIds - pageId else currentIds + pageId
+            savedStateHandle[selectedPageIdsKey] = newIds
         }
     }
 
     fun onPageLongClick(pageId: String) {
         if (!isSortModeActive.value) {
-            _selectedPageIds.update { currentIds -> currentIds + pageId }
+            val newIds = selectedPageIds.value + pageId
+            savedStateHandle[selectedPageIdsKey] = newIds
         }
     }
 
     fun clearSelection() {
-        _selectedPageIds.value = emptySet()
+        savedStateHandle[selectedPageIdsKey] = emptySet<String>()
     }
 
     fun toggleSortMode() {
-        _isSortModeActive.value = !_isSortModeActive.value
-        if (_isSortModeActive.value) {
-            clearSelection()
-        }
-    }
+        val newSortModeState = !_isSortModeActive.value
+        _isSortModeActive.value = newSortModeState
 
-    fun reorderPages(fromIndex: Int, toIndex: Int) {
-        val currentDoc = _documentState.value ?: return
-        val currentPages = currentDoc.pages.toMutableList()
-
-        currentPages.add(toIndex, currentPages.removeAt(fromIndex))
-        _documentState.update { it?.copy(pages = currentPages) }
-
-        viewModelScope.launch {
-            repository.updatePageOrder(currentPages)
-            analytics.logEvent("pages_reordered", null)
-        }
-    }
-
-    fun addPages(scannedUris: List<Uri>) {
-        viewModelScope.launch {
-            crashlytics.log("Adding ${scannedUris.size} pages to document $documentId")
-            if (scannedUris.isNotEmpty()) {
-                repository.addPagesToDocument(documentId, scannedUris)
-                analytics.logEvent("pages_added") {
-                    param("added_count", scannedUris.size.toLong())
+        if (newSortModeState) {
+            viewModelScope.launch {
+                if (!settingsRepository.sortHintShown.first()) {
+                    _uiEventFlow.emit(UiEvent.ShowSnackbar("Удерживайте и перетаскивайте страницы для сортировки"))
+                    settingsRepository.setSortHintShown(true)
                 }
+            }
+        } else {
+            persistReorderedPages()
+        }
+    }
+
+    fun reorderPagesInMemory(reorderedList: List<PageEntity>) {
+        _reorderedPages.value = reorderedList
+    }
+
+    private fun persistReorderedPages() {
+        val pagesToPersist = _reorderedPages.value ?: return
+
+        viewModelScope.launch {
+            try {
+                val updatedEntities = pagesToPersist.mapIndexed { index, page ->
+                    page.copy(position = index.toLong())
+                }
+                repository.updatePageOrder(updatedEntities)
+                analytics.logEvent("pages_reordered", null)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to persist reordered pages")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            } finally {
+                _reorderedPages.value = null
+            }
+        }
+    }
+
+    fun addPages(uris: List<Uri>) {
+        viewModelScope.launch {
+            val requiredSpace = storageService.estimateForPages(uris.size)
+            val operationDir = storageService.appFilesDir()
+
+            var reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
+            if (reservation == null) {
+                storageService.clearExportCache()
+                reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
+            }
+
+            reservation?.use { _ ->
+                try {
+                    crashlytics.log("Adding ${uris.size} pages to document $documentId")
+                    if (uris.isNotEmpty()) {
+                        repository.addPagesToDocument(documentId, uris)
+                        analytics.logEvent(
+                            "pages_added", bundleOf(
+                                "added_count" to uris.size.toLong()
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to add pages")
+                    crashlytics.recordException(e)
+                    _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.ImageProcessingError))
+                }
+            } ?: run {
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.NotEnoughStorageError))
             }
         }
     }
 
     fun deleteSelectedPages() {
-        val pageIds = _selectedPageIds.value.toList()
+        val pageIds = selectedPageIds.value.toList()
         if (pageIds.isEmpty()) return
         deletePagesJob?.cancel()
-
         pagesPendingDeletion.clear()
         pagesPendingDeletion.addAll(pageIds)
         _pendingDeletionPageIds.update { it + pageIds.toSet() }
         clearSelection()
-
         viewModelScope.launch {
             _uiEventFlow.emit(
                 UiEvent.ShowSnackbar(
                     "Страницы удалены",
-                    actionLabel = context.getString(R.string.action_cancel)
+                    actionLabel = stringProvider.getString(R.string.action_cancel)
                 )
             )
         }
-
         deletePagesJob = viewModelScope.launch {
-            delay(5000)
-            repository.deletePages(pageIds)
-            _pendingDeletionPageIds.update { it - pageIds.toSet() }
-            pagesPendingDeletion.clear()
-
-            if (_documentState.value?.pages.isNullOrEmpty()) {
-                _uiEventFlow.emit(UiEvent.NavigateBack)
+            try {
+                delay(5000)
+                analytics.logEvent("pages_deleted", bundleOf("count" to pageIds.size.toLong()))
+                repository.deletePages(pageIds)
+                _pendingDeletionPageIds.update { it - pageIds.toSet() }
+                pagesPendingDeletion.clear()
+                if (documentFlow.value?.pages?.none { it.id !in pageIds.toSet() } == true) {
+                    _uiEventFlow.emit(UiEvent.NavigateBack)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to delete pages")
+                crashlytics.recordException(e)
+                _pendingDeletionPageIds.update { it - pageIds.toSet() }
+                pagesPendingDeletion.clear()
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }
     }
 
     fun undoDeletePages() {
         deletePagesJob?.cancel()
-        _pendingDeletionPageIds.update { it - pagesPendingDeletion.toSet() }
-        pagesPendingDeletion.clear()
         viewModelScope.launch {
-            _uiEventFlow.emit(UiEvent.ShowSnackbar("Удаление отменено"))
+            try {
+                _pendingDeletionPageIds.update { it - pagesPendingDeletion.toSet() }
+                pagesPendingDeletion.clear()
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Удаление отменено"))
+            } catch (e: Exception) {
+                Timber.e(e, "Failed during undo logic")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General(e.message)))
+            }
         }
     }
 
-    // ==========================================================
-    // ИЗМЕНЕНИЕ: Все методы экспорта теперь делегируют вызовы ExportManagerDelegate
-    // ==========================================================
     fun onShareRequest() {
-        val pageIds = _selectedPageIds.value.toList()
-        val documentTitle = _documentState.value?.document?.title ?: "ScanWisp_Document"
+        val pageIds = selectedPageIds.value.toList()
+        val documentTitle = documentFlow.value?.document?.title ?: "ScanWisp_Document"
         exportManager.requestExportForPages(pageIds, documentTitle, ExportAction.SHARE)
     }
 
-    fun onShareDialogDismiss() = exportManager.onDialogDismiss()
+    fun onShareDialogDismiss() {
+        exportManager.onDialogDismiss()
+        clearSelection()
+    }
 
     fun onShareDialogConfirm(format: ExportFormat, filename: String) {
         viewModelScope.launch {
             _loadingState.update {
                 it.copy(
                     isBusy = true,
-                    message = context.getString(R.string.loading)
+                    message = stringProvider.getString(R.string.loading)
                 )
             }
             val event = exportManager.onConfirmExport(format, filename)

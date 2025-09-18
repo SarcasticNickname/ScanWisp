@@ -2,7 +2,6 @@ package com.myprojects.scanwisp.data.repository
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.data.local.model.DocumentEntity
@@ -10,6 +9,8 @@ import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
 import com.myprojects.scanwisp.data.local.model.PageEntity
+import com.myprojects.scanwisp.domain.model.SortBy
+import com.myprojects.scanwisp.domain.model.SortOrder
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.utils.ImageProcessor
 import com.myprojects.scanwisp.utils.SafeNamePolicy
@@ -21,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
@@ -40,15 +42,32 @@ class DocumentRepositoryImpl @Inject constructor(
                 file.delete()
             }
         } catch (e: Exception) {
-            Log.e("FileDeletion", "Failed to delete file at path: $path", e)
+            Timber.e(e, "Failed to delete file at path: $path")
         }
     }
 
-    override fun getDocumentRows(folderId: String?, query: String): Flow<List<DocumentRow>> {
-        return if (folderId == null) {
-            dao.getOrphanDocumentRows(query)
+    // Более надежная функция подготовки FTS-запроса
+    private fun prepareFtsQuery(raw: String): String =
+        raw.trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { "\"${it.replace("\"", "\"\"")}\"*" }
+
+    override fun getDocumentRows(
+        folderId: String?,
+        query: String,
+        sortBy: SortBy,
+        sortOrder: SortOrder
+    ): Flow<List<DocumentRow>> {
+        val sortByStr = sortBy.name
+        val sortOrderStr = sortOrder.name
+
+        // Логика выбора нужного DAO-метода
+        return if (query.isBlank()) {
+            dao.getDocumentRowsWithoutSearch(folderId, sortByStr, sortOrderStr)
         } else {
-            dao.getDocumentRowsInFolder(folderId, query)
+            val ftsQuery = prepareFtsQuery(query)
+            dao.getDocumentRowsWithSearch(folderId, ftsQuery, sortByStr, sortOrderStr)
         }
     }
 
@@ -79,7 +98,10 @@ class DocumentRepositoryImpl @Inject constructor(
             ) else null
         }
 
-        if (validPages.isEmpty()) return
+        if (validPages.isEmpty()) {
+            Timber.e("No pages decoded from URIs: ${sourceUris.joinToString()}")
+            throw IllegalStateException("No pages decoded from scanner URIs")
+        }
 
         val documentId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
@@ -147,7 +169,11 @@ class DocumentRepositoryImpl @Inject constructor(
             ) else null
         }
 
-        if (validPages.isEmpty()) return
+        if (validPages.isEmpty()) {
+            Timber.e("No pages decoded from URIs: ${sourceUris.joinToString()}")
+            throw IllegalStateException("No pages decoded from scanner URIs")
+        }
+
 
         val documentWithPages = dao.getDocumentWithPagesById(documentId).first()
         val maxPosition = documentWithPages?.pages?.maxOfOrNull { it.position } ?: -1L
@@ -346,5 +372,39 @@ class DocumentRepositoryImpl @Inject constructor(
         }
         val remainingPageCount = dao.getPageCount(originalDocumentId) - pageIds.size
         dao.splitPagesFromDocument(newDocumentsAndPages, documentToUpdate, remainingPageCount == 0)
+    }
+
+    override fun getDeletedDocumentRows(): Flow<List<DocumentRow>> {
+        return dao.getDeletedDocumentRows()
+    }
+
+    override suspend fun restoreDocument(documentId: String) {
+        val document = dao.getDocumentById(documentId)
+        if (document != null) {
+            // Восстанавливаем в оригинальную папку или в корень, если ее удалили
+            val originalFolderExists = document.folderId?.let { dao.getFolderById(it) } != null
+            if (document.folderId != null && originalFolderExists) {
+                dao.restoreDocumentToFolder(documentId, document.folderId)
+            } else {
+                dao.restoreDocumentToRoot(documentId)
+            }
+        }
+    }
+
+    override suspend fun deleteDocumentsPermanently(documentIds: List<String>) {
+        if (documentIds.isEmpty()) return
+
+        // Сначала удаляем связанные файлы
+        withContext(Dispatchers.IO) {
+            documentIds.forEach { docId ->
+                val docWithPages = dao.getDocumentWithPagesById(docId).first()
+                docWithPages?.pages?.forEach { page ->
+                    deleteFileFromPath(page.processedImagePath)
+                    deleteFileFromPath(page.thumbnailPath)
+                }
+            }
+        }
+        // Затем удаляем записи из БД
+        dao.deleteDocumentsByIds(documentIds)
     }
 }

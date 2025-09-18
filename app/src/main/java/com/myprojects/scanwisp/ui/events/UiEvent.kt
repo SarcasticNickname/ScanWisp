@@ -1,6 +1,8 @@
 package com.myprojects.scanwisp.ui.events
 
+import android.content.IntentSender
 import androidx.compose.runtime.Stable
+import com.myprojects.scanwisp.domain.model.AppError
 import java.io.File
 
 /**
@@ -34,6 +36,17 @@ sealed class UiEvent {
      * @param tempFile Временный файл, созданный для этого интента, который нужно удалить после использования.
      */
     data class LaunchSaveIntent(val intent: android.content.Intent, val tempFile: File) : UiEvent()
+
+    /**
+     *  Событие для запуска сканера ML Kit.
+     * @param intentSender Объект для запуска UI сканера.
+     */
+    data class LaunchScanner(val intentSender: IntentSender) : UiEvent()
+
+    /**
+     * Событие для показа диалогового окна с типизированной ошибкой.
+     */
+    data class ShowErrorDialog(val error: AppError) : UiEvent()
 
     /**
      * Событие, которое указывает UI выполнить навигацию назад.

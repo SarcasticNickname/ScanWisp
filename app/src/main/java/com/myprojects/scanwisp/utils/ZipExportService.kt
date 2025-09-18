@@ -4,10 +4,10 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -18,8 +18,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private const val TAG = "ZipExportService"
 
 /**
  * Создаёт ZIP из набора путей (строки могут быть file-path или content://-URI).
@@ -56,14 +54,14 @@ class ZipExportService @Inject constructor(
                         val entryName = buildUniqueEntryName(uri, usedNames, policy)
                         addEntry(zos, uri, entryName)
                     } catch (e: Throwable) {
-                        Log.w(TAG, "Skip entry due to error: $path", e)
+                        Timber.e(e, "Skip entry due to error: $path")
                         // Продолжаем со следующими файлами
                     }
                 }
             }
             return@withContext zipFile
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to create ZIP", e)
+            Timber.e(e, "Failed to create ZIP")
             zipFile.delete()
             null
         }

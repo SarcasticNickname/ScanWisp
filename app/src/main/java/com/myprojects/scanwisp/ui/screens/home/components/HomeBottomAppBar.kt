@@ -3,9 +3,11 @@ package com.myprojects.scanwisp.ui.screens.home.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +38,6 @@ data class BottomNavItem(
 fun ScanWispBottomAppBar(
     navController: NavController
 ) {
-    // START: AI_MODIFIED_BLOCK - Строки вынесены в ресурсы
     val navItems = listOf(
         BottomNavItem(
             stringResource(R.string.bottom_nav_home),
@@ -51,13 +52,18 @@ fun ScanWispBottomAppBar(
             Icons.Outlined.Folder
         ),
         BottomNavItem(
+            stringResource(R.string.bottom_nav_trash),
+            Screen.Trash.route,
+            Icons.Filled.RestoreFromTrash,
+            Icons.Outlined.RestoreFromTrash
+        ),
+        BottomNavItem(
             stringResource(R.string.bottom_nav_settings),
             Screen.Settings.route,
             Icons.Filled.Settings,
             Icons.Outlined.Settings
         )
     )
-    // END: AI_MODIFIED_BLOCK
 
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

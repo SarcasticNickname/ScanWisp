@@ -1,23 +1,22 @@
 package com.myprojects.scanwisp.ui.screens.home
 
-import android.content.Context
+import android.app.Activity
 import android.net.Uri
-import android.util.Log
 import androidx.compose.runtime.Immutable
+import androidx.core.os.bundleOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.ads.AdListener
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.nativead.NativeAd
 import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.ktx.logEvent
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.myprojects.scanwisp.R
+import com.myprojects.scanwisp.ads.AdPoolManager
+import com.myprojects.scanwisp.core.storage.StorageService
 import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.data.local.model.FolderEntity
+import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ExportFormat
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
@@ -25,15 +24,17 @@ import com.myprojects.scanwisp.domain.model.ViewMode
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.RemoteConfigRepository
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
+import com.myprojects.scanwisp.domain.repository.StringProvider
 import com.myprojects.scanwisp.domain.use_case.DeleteDocumentsUseCase
 import com.myprojects.scanwisp.domain.use_case.MergeDocumentsUseCase
 import com.myprojects.scanwisp.ui.delegate.ExportManagerDelegate
 import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.state.HomeScreenUiState
 import com.myprojects.scanwisp.ui.state.LoadingState
+import com.myprojects.scanwisp.utils.SafeNamePolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,11 +45,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 
@@ -62,21 +70,26 @@ data class ShareDialogState(
     val action: ExportAction = ExportAction.SHARE
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val documentRepository: DocumentRepository,
     private val settingsRepository: SettingsRepository,
     private val remoteConfigRepository: RemoteConfigRepository,
-    @ApplicationContext private val context: Context,
+    private val stringProvider: StringProvider,
     private val deleteDocumentsUseCase: DeleteDocumentsUseCase,
     private val mergeDocumentsUseCase: MergeDocumentsUseCase,
-    // ИЗМЕНЕНИЕ: Внедряем наш новый делегат для экспорта
     private val exportManager: ExportManagerDelegate,
-    savedStateHandle: SavedStateHandle,
-    private val safeNamePolicy: com.myprojects.scanwisp.utils.SafeNamePolicy,
+    private val adPoolManager: AdPoolManager,
+    private val savedStateHandle: SavedStateHandle,
+    private val safeNamePolicy: SafeNamePolicy,
     private val analytics: FirebaseAnalytics,
-    private val crashlytics: FirebaseCrashlytics
+    private val crashlytics: FirebaseCrashlytics,
+    private val storageService: StorageService,
 ) : ViewModel() {
+
+    private val searchQueryKey = "homeSearchQuery"
+    private val selectedIdsKey = "homeSelectedIds"
 
     private val folderId: String? = savedStateHandle["folderId"]
 
@@ -87,16 +100,33 @@ class HomeViewModel @Inject constructor(
     val uiEventFlow = _uiEventFlow.asSharedFlow()
 
     private val _loadingState = MutableStateFlow(LoadingState())
-    private val _selectedDocumentIds = MutableStateFlow<Set<String>>(emptySet())
-    private val _searchQuery = MutableStateFlow("")
+
+    private val _selectedDocumentIds =
+        savedStateHandle.getStateFlow(key = selectedIdsKey, initialValue = emptySet<String>())
+
+    private val _searchQuery = savedStateHandle.getStateFlow(searchQueryKey, "")
+    val searchQuery: StateFlow<String> = _searchQuery
 
     private val _showSortSheet = MutableStateFlow(false)
     val showSortSheet = _showSortSheet.asStateFlow()
 
     private val _documentsPendingUndo = MutableStateFlow<List<String>>(emptyList())
 
-    // ИЗМЕНЕНИЕ: Состояние диалога теперь берем напрямую из делегата
-    val shareDialogState: StateFlow<ShareDialogState> = exportManager.shareDialogState
+    val shareDialogState: StateFlow<ShareDialogState> =
+        exportManager.shareDialogState
+            .map { s ->
+                ShareDialogState(
+                    isVisible = s.isVisible,
+                    pageCount = s.pageCount,
+                    defaultName = s.defaultName,
+                    action = s.action
+                )
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = ShareDialogState()
+            )
 
     val sortBy = settingsRepository.sortBy.stateIn(
         scope = viewModelScope,
@@ -111,108 +141,161 @@ class HomeViewModel @Inject constructor(
     )
 
     init {
-        // ... (init блок остается без изменений)
         crashlytics.setCustomKey("current_screen", if (folderId == null) "home" else "folder_view")
 
-        viewModelScope.launch {
-            val screenTitleFlow = if (folderId != null) {
-                documentRepository.getFolderById(folderId)?.let { folder ->
-                    MutableStateFlow(folder.name)
-                } ?: MutableStateFlow(context.getString(R.string.home_screen_title_default))
-            } else {
-                MutableStateFlow(context.getString(R.string.home_screen_title_default))
+        _selectedDocumentIds
+            .onEach { ids -> savedStateHandle[selectedIdsKey] = ids }
+            .launchIn(viewModelScope)
+
+        // -------- 1) ПОТОК ТОЛЬКО ДЛЯ ДОКУМЕНТОВ (с debounce) --------
+        @OptIn(FlowPreview::class)
+        val documentsFlow = combine(
+            _searchQuery.debounce(300L),
+            sortBy,
+            sortOrder
+        ) { query, sb, so ->
+            if (query.isNotBlank()) {
+                analytics.logEvent(
+                    "search_performed",
+                    bundleOf("query_length" to query.length.toLong())
+                )
             }
+            Triple(query, sb, so)
+        }.flatMapLatest { (query, currentSortBy, currentSortOrder) ->
+            documentRepository.getDocumentRows(folderId, query, currentSortBy, currentSortOrder)
+        }
 
-            @OptIn(FlowPreview::class)
-            val documentsFlow = _searchQuery
-                .debounce(300L)
-                .flatMapLatest { query ->
-                    documentRepository.getDocumentRows(folderId, query)
-                }
 
-            combine(
-                documentsFlow,
+        val itemsFlow = documentsFlow
+            .distinctUntilChanged()
+            .map { docs -> insertAdsIntoList(docs) }
+
+        // -------- 2) АСИНХРОННЫЙ ПОТОК ДЛЯ ЗАГОЛОВКА ЭКРАНА --------
+        val screenTitleFlow: StateFlow<String> = flow {
+            val title = if (folderId != null) {
+                documentRepository.getFolderById(folderId)?.name
+                    ?: stringProvider.getString(R.string.home_screen_title_default)
+            } else {
+                stringProvider.getString(R.string.home_screen_title_default)
+            }
+            emit(title)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = stringProvider.getString(R.string.loading)
+        )
+
+        // -------- 3) ФИНАЛЬНЫЙ COMBINE ДЛЯ 6 ПОТОКОВ (с ручным приведением типов) --------
+        combine(
+            listOf( // Передаем потоки как список
+                itemsFlow,
                 documentRepository.getAllFolders(),
                 _selectedDocumentIds,
                 _loadingState,
                 screenTitleFlow,
-                _searchQuery,
-                sortBy,
-                sortOrder,
                 settingsRepository.viewMode
-            ) { values ->
-                @Suppress("UNCHECKED_CAST")
-                val documents = values[0] as List<DocumentRow>
+            )
+        ) { values ->
+            // Получаем значения из массива и приводим их к нужным типам
+            @Suppress("UNCHECKED_CAST")
+            val items = values[0] as List<Any>
 
-                @Suppress("UNCHECKED_CAST")
-                val folders = values[1] as List<FolderEntity>
+            @Suppress("UNCHECKED_CAST")
+            val folders = values[1] as List<FolderEntity>
 
-                @Suppress("UNCHECKED_CAST")
-                val selectedIds = values[2] as Set<String>
+            @Suppress("UNCHECKED_CAST")
+            val selectedIds = values[2] as Set<String>
 
-                @Suppress("UNCHECKED_CAST")
-                val loading = values[3] as LoadingState
+            @Suppress("UNCHECKED_CAST")
+            val loading = values[3] as LoadingState
 
-                @Suppress("UNCHECKED_CAST")
-                val title = values[4] as String
+            @Suppress("UNCHECKED_CAST")
+            val title = values[4] as String
 
-                @Suppress("UNCHECKED_CAST")
-                val query = values[5] as String
+            @Suppress("UNCHECKED_CAST")
+            val viewMode = values[5] as ViewMode
 
-                @Suppress("UNCHECKED_CAST")
-                val currentSortBy = values[6] as SortBy
-
-                @Suppress("UNCHECKED_CAST")
-                val currentSortOrder = values[7] as SortOrder
-
-                @Suppress("UNCHECKED_CAST")
-                val viewMode = values[8] as ViewMode
-
-                val adPosition = remoteConfigRepository.getNativeAdPosition()
-
-                val sortedDocuments = when (currentSortBy) {
-                    SortBy.DATE -> {
-                        if (currentSortOrder == SortOrder.DESCENDING) {
-                            documents.sortedByDescending { it.creationTimestamp }
-                        } else {
-                            documents.sortedBy { it.creationTimestamp }
-                        }
-                    }
-
-                    SortBy.NAME -> {
-                        if (currentSortOrder == SortOrder.DESCENDING) {
-                            documents.sortedByDescending { it.title }
-                        } else {
-                            documents.sortedBy { it.title }
-                        }
-                    }
-                }
-
-                HomeScreenUiState.Data(
-                    screenTitle = title,
-                    documents = sortedDocuments,
-                    allFolders = folders,
-                    nativeAd = (_uiState.value as? HomeScreenUiState.Data)?.nativeAd,
-                    loadingState = loading,
-                    selectedDocumentIds = selectedIds,
-                    searchQuery = query,
-                    viewMode = viewMode,
-                    adPosition = adPosition
-                )
-            }.map { data ->
-                data as HomeScreenUiState
-            }.catch { e ->
-                Log.e("HomeViewModel", "Error in state flow", e)
-                crashlytics.recordException(e)
-                emit(HomeScreenUiState.Error(context.getString(R.string.error_failed_to_load_documents)))
-            }.collect { dataState ->
-                _uiState.value = dataState
-            }
+            // Создаем объект состояния
+            HomeScreenUiState.Data(
+                screenTitle = title,
+                items = items,
+                allFolders = folders,
+                loadingState = loading,
+                selectedDocumentIds = selectedIds,
+                viewMode = viewMode
+            )
         }
-        loadNativeAd()
+            .flowOn(Dispatchers.Default)
+            .catch { e ->
+                Timber.e(e, "Error in state flow")
+                crashlytics.recordException(e)
+                _uiState.value = HomeScreenUiState.Error(AppError.LoadDataError)
+            }
+            .onEach { dataState -> _uiState.value = dataState }
+            .launchIn(viewModelScope)
     }
 
-    // ... (mergeSelectedDocuments, onSortClick и т.д. остаются без изменений)
+    fun insertAdsIntoList(documents: List<DocumentRow>): List<Any> {
+        if (!remoteConfigRepository.isNativeAdEnabled() || documents.isEmpty()) {
+            return documents
+        }
+
+        val startPosition = remoteConfigRepository.getNativeAdStartPosition()
+        val interval = remoteConfigRepository.getNativeAdInterval()
+
+        val combinedList = mutableListOf<Any>()
+        var itemsSinceLastAd = 0
+
+        documents.forEachIndexed { index, document ->
+            combinedList.add(document)
+            itemsSinceLastAd++
+
+            val isAfterStartPosition = (index + 1) >= startPosition
+            val isIntervalReached = itemsSinceLastAd >= interval
+
+            if (isAfterStartPosition && isIntervalReached) {
+                adPoolManager.getAd()?.let { ad ->
+                    combinedList.add(ad)
+                    itemsSinceLastAd = 0
+                }
+            }
+        }
+        return combinedList
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+    }
+
+    fun onScanButtonClicked(activity: Activity) {
+        viewModelScope.launch {
+            _loadingState.update { it.copy(isBusy = true, message = "Подготовка сканера...") }
+
+            val scannerOptions = GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(true)
+                .setPageLimit(10)
+                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build()
+            val scanner = GmsDocumentScanning.getClient(scannerOptions)
+
+            scanner.getStartScanIntent(activity)
+                .addOnSuccessListener { intentSender ->
+                    viewModelScope.launch {
+                        _loadingState.update { it.copy(isBusy = false) }
+                        _uiEventFlow.emit(UiEvent.LaunchScanner(intentSender))
+                    }
+                }
+                .addOnFailureListener { e ->
+                    viewModelScope.launch {
+                        crashlytics.recordException(e)
+                        _loadingState.update { it.copy(isBusy = false) }
+                        _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.ScannerLaunchError))
+                    }
+                }
+        }
+    }
+
     fun mergeSelectedDocuments() {
         viewModelScope.launch {
             val selectedIds = _selectedDocumentIds.value.toList()
@@ -222,27 +305,20 @@ class HomeViewModel @Inject constructor(
 
             _loadingState.update { it.copy(isBusy = true, message = "Объединение...") }
             try {
-                // Вызываем UseCase, который содержит всю бизнес-логику
                 val newTitle = mergeDocumentsUseCase(selectedIds, folderId)
 
-                // Логика, специфичная для ViewModel (аналитика, UI-события) остается здесь
-                analytics.logEvent("documents_merged") {
-                    param("merged_count", selectedIds.size.toLong())
-                }
-                _uiEventFlow.emit(UiEvent.ShowSnackbar("Документы успешно объединены в '$newTitle'"))
-            } catch (e: IllegalArgumentException) {
-                // Обрабатываем конкретную ошибку от UseCase
-                _uiEventFlow.emit(UiEvent.ShowSnackbar(e.message ?: "Ошибка валидации"))
-            } catch (e: Exception) {
-                // Обрабатываем все остальные ошибки
-                Log.e("HomeViewModel", "Failed to merge documents", e)
-                crashlytics.recordException(e)
-                _uiEventFlow.emit(
-                    UiEvent.ShowSnackbar(
-                        "Ошибка при объединении документов",
-                        isError = true
+                analytics.logEvent(
+                    "documents_merged", bundleOf(
+                        "merged_count" to selectedIds.size.toLong()
                     )
                 )
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Документы успешно объединены в '$newTitle'"))
+            } catch (e: IllegalArgumentException) {
+                _uiEventFlow.emit(UiEvent.ShowSnackbar(e.message ?: "Ошибка валидации"))
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to merge documents")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             } finally {
                 clearSelection()
                 _loadingState.update { it.copy(isBusy = false) }
@@ -255,55 +331,62 @@ class HomeViewModel @Inject constructor(
     fun onSortDismiss() = _showSortSheet.update { false }
 
     fun onSortByChanged(newSortBy: SortBy) {
-        viewModelScope.launch { settingsRepository.saveSortBy(newSortBy) }
+        analytics.logEvent("sort_changed", bundleOf("type" to "sort_by", "value" to newSortBy.name))
+        viewModelScope.launch {
+            try {
+                settingsRepository.saveSortBy(newSortBy)
+            } catch (e: Exception) {
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
     }
 
     fun onSortOrderChanged(newSortOrder: SortOrder) {
-        viewModelScope.launch { settingsRepository.saveSortOrder(newSortOrder) }
+        analytics.logEvent(
+            "sort_changed",
+            bundleOf("type" to "sort_order", "value" to newSortOrder.name)
+        )
+        viewModelScope.launch {
+            try {
+                settingsRepository.saveSortOrder(newSortOrder)
+            } catch (e: Exception) {
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
     }
 
     fun toggleViewMode() {
         viewModelScope.launch {
-            val currentMode = (uiState.value as? HomeScreenUiState.Data)?.viewMode ?: ViewMode.GRID
-            val newMode = if (currentMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
-            analytics.logEvent("view_mode_toggled") { param("new_mode", newMode.name.lowercase()) }
-            settingsRepository.saveViewMode(newMode)
+            try {
+                val currentMode = settingsRepository.viewMode.first()
+                val newMode = if (currentMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
+                analytics.logEvent(
+                    "view_mode_toggled",
+                    bundleOf("new_mode" to newMode.name.lowercase())
+                )
+                settingsRepository.saveViewMode(newMode)
+            } catch (e: Exception) {
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
         }
     }
 
     fun selectAllDocuments() {
+        analytics.logEvent("select_all_clicked", null)
         val currentState = _uiState.value
         if (currentState is HomeScreenUiState.Data) {
-            _selectedDocumentIds.value = currentState.documents.map { it.id }.toSet()
+            val allIds = currentState.items.filterIsInstance<DocumentRow>().map { it.id }.toSet()
+            savedStateHandle[selectedIdsKey] = allIds
         }
     }
 
     fun onSearchQueryChanged(query: String) {
-        _searchQuery.value = query
-    }
-
-    private fun loadNativeAd() {
-        val adUnitId = "ca-app-pub-3940256099942544/2247696110"
-        val adLoader = AdLoader.Builder(context, adUnitId)
-            .forNativeAd { ad: NativeAd ->
-                val currentState = _uiState.value
-                if (currentState is HomeScreenUiState.Data) {
-                    currentState.nativeAd?.destroy()
-                    _uiState.value = currentState.copy(nativeAd = ad)
-                }
-            }
-            .withAdListener(object : AdListener() {
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    Log.e("AdMob", "Native ad failed to load: ${adError.message}")
-                }
-            })
-            .build()
-        adLoader.loadAd(AdRequest.Builder().build())
-    }
-
-    override fun onCleared() {
-        (_uiState.value as? HomeScreenUiState.Data)?.nativeAd?.destroy()
-        super.onCleared()
+        if (query != _searchQuery.value) {
+            savedStateHandle[searchQueryKey] = query
+        }
     }
 
     fun onDocumentClick(documentId: String) {
@@ -317,28 +400,51 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun toggleSelection(documentId: String) {
-        _selectedDocumentIds.update { currentIds ->
+        val currentIds = _selectedDocumentIds.value
+        val newIds =
             if (documentId in currentIds) currentIds - documentId else currentIds + documentId
-        }
+        savedStateHandle[selectedIdsKey] = newIds
     }
 
     fun clearSelection() {
-        _selectedDocumentIds.value = emptySet()
+        savedStateHandle[selectedIdsKey] = emptySet<String>()
     }
 
-    fun createNewDocument(scannedUris: List<Uri>) {
-        if (scannedUris.isEmpty()) return
+    fun createNewDocument(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            crashlytics.log("Creating new document with ${scannedUris.size} pages.")
-            val title = safeNamePolicy.newDocumentTitle()
-            documentRepository.createDocument(title, scannedUris, folderId)
-            analytics.logEvent("document_created") {
-                param("page_count", scannedUris.size.toLong())
-                val firstUri = scannedUris.firstOrNull()?.toString() ?: ""
-                param(
-                    "source",
-                    if (firstUri.contains("com.google.android.gms")) "scanner" else "gallery"
-                )
+            val requiredSpace = storageService.estimateForPages(uris.size)
+            val operationDir = storageService.appFilesDir()
+
+            var reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
+            if (reservation == null) {
+                storageService.clearExportCache()
+                reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
+            }
+
+            reservation?.use { _ ->
+                try {
+                    crashlytics.log("Creating new document with ${uris.size} pages.")
+                    val title = safeNamePolicy.newDocumentTitle()
+
+                    Timber.d("ViewModel: Attempting to create document...")
+                    documentRepository.createDocument(title, uris, folderId)
+                    Timber.d("ViewModel: Document creation call finished.")
+
+                    val firstUri = uris.firstOrNull()?.toString() ?: ""
+                    analytics.logEvent(
+                        "document_created", bundleOf(
+                            "page_count" to uris.size.toLong(),
+                            "source" to if (firstUri.contains("com.google.android.gms")) "scanner" else "gallery"
+                        )
+                    )
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to create new document")
+                    crashlytics.recordException(e)
+                    _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.ImageProcessingError))
+                }
+            } ?: run {
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.NotEnoughStorageError))
             }
         }
     }
@@ -351,68 +457,81 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun undoDelete() {
-        val idsToUndo = _documentsPendingUndo.value
-        if (idsToUndo.isEmpty()) return
+    suspend fun undoDelete() {
+        try {
+            val idsToUndo = _documentsPendingUndo.value
+            if (idsToUndo.isEmpty()) return
 
-        viewModelScope.launch {
-            deleteDocumentsUseCase.undo(idsToUndo)
-            _documentsPendingUndo.value = emptyList()
-            _uiEventFlow.emit(UiEvent.ShowSnackbar("Удаление отменено"))
+            viewModelScope.launch {
+                deleteDocumentsUseCase.undo(idsToUndo)
+                _documentsPendingUndo.value = emptyList()
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Удаление отменено"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to undo deletion")
+            _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
         }
     }
 
     private fun initiateDelete(documentIds: List<String>) {
         if (documentIds.isEmpty()) return
 
+        analytics.logEvent("documents_deleted", bundleOf("count" to documentIds.size.toLong()))
         _documentsPendingUndo.value = documentIds
 
         viewModelScope.launch {
-            deleteDocumentsUseCase(documentIds)
-            clearSelection()
-            _uiEventFlow.emit(
-                UiEvent.ShowSnackbar(
-                    message = "Документы удалены",
-                    actionLabel = context.getString(R.string.action_cancel)
+            try {
+                deleteDocumentsUseCase(documentIds)
+                clearSelection()
+                _uiEventFlow.emit(
+                    UiEvent.ShowSnackbar(
+                        message = "Документы удалены",
+                        actionLabel = stringProvider.getString(R.string.action_cancel)
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to soft-delete documents")
+                _documentsPendingUndo.value = emptyList()
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
         }
     }
 
-    // ==========================================================
-    // ИЗМЕНЕНИЕ: Все методы экспорта теперь делегируют вызовы ExportManagerDelegate
-    // ==========================================================
     fun onShareRequest() {
         viewModelScope.launch {
             val state = _uiState.value as? HomeScreenUiState.Data ?: return@launch
+            val allDocuments = state.items.filterIsInstance<DocumentRow>()
+            val selectedDocs = allDocuments.filter { it.id in _selectedDocumentIds.value }
             exportManager.requestExportForDocuments(
-                _selectedDocumentIds.value.toList(),
-                state.documents,
-                ExportAction.SHARE
+                documents = selectedDocs,
+                defaultName = defaultExportName(selectedDocs),
+                action = ExportAction.SHARE
             )
-            clearSelection()
         }
     }
 
     fun onSaveRequest() {
         viewModelScope.launch {
             val state = _uiState.value as? HomeScreenUiState.Data ?: return@launch
+            val allDocuments = state.items.filterIsInstance<DocumentRow>()
+            val selectedDocs = allDocuments.filter { it.id in _selectedDocumentIds.value }
             exportManager.requestExportForDocuments(
-                _selectedDocumentIds.value.toList(),
-                state.documents,
-                ExportAction.SAVE
+                documents = selectedDocs,
+                defaultName = defaultExportName(selectedDocs),
+                action = ExportAction.SAVE
             )
-            clearSelection()
         }
     }
 
     fun onShareSingleDocument(documentId: String) {
         viewModelScope.launch {
             val state = _uiState.value as? HomeScreenUiState.Data ?: return@launch
+            val allDocuments = state.items.filterIsInstance<DocumentRow>()
+            val selectedDocs = allDocuments.filter { it.id == documentId }
             exportManager.requestExportForDocuments(
-                listOf(documentId),
-                state.documents,
-                ExportAction.SHARE
+                documents = selectedDocs,
+                defaultName = defaultExportName(selectedDocs),
+                action = ExportAction.SHARE
             )
         }
     }
@@ -420,22 +539,26 @@ class HomeViewModel @Inject constructor(
     fun onDownloadSingleDocument(documentId: String) {
         viewModelScope.launch {
             val state = _uiState.value as? HomeScreenUiState.Data ?: return@launch
+            val allDocuments = state.items.filterIsInstance<DocumentRow>()
+            val selectedDocs = allDocuments.filter { it.id == documentId }
             exportManager.requestExportForDocuments(
-                listOf(documentId),
-                state.documents,
-                ExportAction.SAVE
+                documents = selectedDocs,
+                defaultName = defaultExportName(selectedDocs),
+                action = ExportAction.SAVE
             )
         }
     }
 
-    fun onShareDialogDismiss() = exportManager.onDialogDismiss()
+    fun onShareDialogDismiss() {
+        exportManager.onDialogDismiss()
+        clearSelection()
+    }
 
     fun onShareDialogConfirm(format: ExportFormat, filename: String) {
         viewModelScope.launch {
             _loadingState.update { it.copy(isBusy = true, message = "Экспорт...") }
             val event = exportManager.onConfirmExport(format, filename)
             _uiEventFlow.emit(event)
-            // Дополнительно эмитим событие для In-App Review, если это было сохранение
             if (event is UiEvent.LaunchSaveIntent) {
                 _uiEventFlow.emit(UiEvent.RequestInAppReview)
             }
@@ -456,26 +579,54 @@ class HomeViewModel @Inject constructor(
             exportManager.cleanUpTempFile(tempFile)
         }
     }
-    // ==========================================================
 
     fun renameDocument(documentId: String, newTitle: String) {
         if (newTitle.isBlank()) return
-        viewModelScope.launch { documentRepository.renameDocument(documentId, newTitle) }
+        viewModelScope.launch {
+            try {
+                analytics.logEvent("document_renamed", null)
+                documentRepository.renameDocument(documentId, newTitle)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to rename document")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
     }
 
     fun moveSelectedDocuments(folderId: String?) {
         if ((_uiState.value as? HomeScreenUiState.Data)?.isSelectionModeActive == true) {
             viewModelScope.launch {
-                val idsToMove = _selectedDocumentIds.value.toList()
-                documentRepository.moveDocumentsToFolder(idsToMove, folderId)
-                clearSelection()
+                try {
+                    val idsToMove = _selectedDocumentIds.value.toList()
+                    analytics.logEvent(
+                        "document_moved",
+                        bundleOf("count" to idsToMove.size.toLong())
+                    )
+                    documentRepository.moveDocumentsToFolder(idsToMove, folderId)
+                    clearSelection()
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to move selected documents")
+                    _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+                }
             }
         }
     }
 
     fun moveDocument(documentId: String, folderId: String?) {
         viewModelScope.launch {
-            documentRepository.moveDocumentsToFolder(listOf(documentId), folderId)
+            try {
+                analytics.logEvent("document_moved", bundleOf("count" to 1L))
+                documentRepository.moveDocumentsToFolder(listOf(documentId), folderId)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to move document")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
         }
+    }
+
+    private fun defaultExportName(selected: List<DocumentRow>): String {
+        if (selected.isEmpty()) return "export"
+        val first = selected.first().title.ifBlank { "export" }
+        return if (selected.size == 1) first else "$first + ${selected.size - 1}"
     }
 }

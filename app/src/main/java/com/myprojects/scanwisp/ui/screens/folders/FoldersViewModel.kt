@@ -1,80 +1,98 @@
 package com.myprojects.scanwisp.ui.screens.folders
 
-import android.content.Context
-import android.util.Log
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.ads.AdListener
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.nativead.NativeAd
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.crashlytics.FirebaseCrashlytics
+import com.myprojects.scanwisp.ads.AdPoolManager
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
+import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.RemoteConfigRepository
+import com.myprojects.scanwisp.ui.events.UiEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * ИЗМЕНЕНИЕ: Класс состояния теперь хранит один смешанный список `items`,
+ * который может содержать как папки, так и рекламу.
+ */
 @Immutable
 data class FoldersScreenState(
-    val folders: List<FolderWithDocumentCount> = emptyList(),
-    val nativeAd: NativeAd? = null,
-    val isLoading: Boolean = true,
-    val adPosition: Int = 1
+    val items: List<Any> = emptyList(),
+    val isLoading: Boolean = true
 )
 
 @HiltViewModel
 class FoldersViewModel @Inject constructor(
     private val repository: DocumentRepository,
     private val remoteConfigRepository: RemoteConfigRepository,
-    @ApplicationContext private val context: Context
+    private val adPoolManager: AdPoolManager,
+    private val analytics: FirebaseAnalytics,
+    private val crashlytics: FirebaseCrashlytics
 ) : ViewModel() {
 
-    private val _foldersState = MutableStateFlow(FoldersScreenState())
-    val foldersState = _foldersState.asStateFlow()
+    private val _uiState = MutableStateFlow<FoldersUiState>(FoldersUiState.Loading)
+    val uiState = _uiState.asStateFlow()
 
     private val _isDialogVisible = MutableStateFlow(false)
     val isDialogVisible = _isDialogVisible.asStateFlow()
 
-    init {
-        // Получаем позицию рекламы ОДИН РАЗ при инициализации
-        val adPosition = remoteConfigRepository.getNativeAdPosition()
-        _foldersState.update { it.copy(adPosition = adPosition) }
+    private val _uiEventFlow = MutableSharedFlow<UiEvent>()
+    val uiEventFlow = _uiEventFlow.asSharedFlow()
 
-        loadNativeAd()
+    init {
         viewModelScope.launch {
-            repository.getFoldersWithDocumentCount().collect { folders ->
-                _foldersState.update { it.copy(folders = folders, isLoading = false) }
-            }
+            repository.getFoldersWithDocumentCount()
+                .catch { e ->
+                    crashlytics.recordException(e) // <-- ДОБАВИТЬ
+                    _uiState.value = FoldersUiState.Error(AppError.LoadDataError)
+                }
+                .collect { folders ->
+                    val combinedList = insertAdsIntoList(folders)
+                    // Обновляем состояние Success
+                    _uiState.value = FoldersUiState.Success(items = combinedList)
+                }
         }
     }
 
-    override fun onCleared() {
-        _foldersState.value.nativeAd?.destroy()
-        super.onCleared()
-    }
+    /**
+     * НОВЫЙ МЕТОД: Вставляет рекламу в список папок согласно правилам из Remote Config.
+     * Логика идентична той, что в HomeViewModel.
+     */
+    private fun insertAdsIntoList(folders: List<FolderWithDocumentCount>): List<Any> {
+        if (!remoteConfigRepository.isNativeAdEnabled() || folders.isEmpty()) {
+            return folders
+        }
 
-    private fun loadNativeAd() {
-        val adUnitId = "ca-app-pub-3940256099942544/2247696110" // Тестовый ID
-        val adLoader = AdLoader.Builder(context, adUnitId)
-            .forNativeAd { ad: NativeAd ->
-                _foldersState.value.nativeAd?.destroy()
-                _foldersState.update { it.copy(nativeAd = ad) }
-            }
-            .withAdListener(object : AdListener() {
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    Log.e("AdMob Folders", "Native ad failed to load: ${adError.message}")
-                    _foldersState.update { it.copy(nativeAd = null) }
+        val startPosition = remoteConfigRepository.getNativeAdStartPosition()
+        val interval = remoteConfigRepository.getNativeAdInterval()
+
+        val combinedList = mutableListOf<Any>()
+        var itemsSinceLastAd = 0
+
+        folders.forEachIndexed { index, folder ->
+            combinedList.add(folder)
+            itemsSinceLastAd++
+
+            val isAfterStartPosition = (index + 1) >= startPosition
+            val isIntervalReached = itemsSinceLastAd >= interval
+
+            if (isAfterStartPosition && isIntervalReached) {
+                adPoolManager.getAd()?.let { ad ->
+                    combinedList.add(ad)
+                    itemsSinceLastAd = 0 // Сбрасываем счетчик
                 }
-            })
-            .build()
-        adLoader.loadAd(AdRequest.Builder().build())
+            }
+        }
+        return combinedList
     }
 
     fun onAddFolderRequest() {
@@ -88,8 +106,18 @@ class FoldersViewModel @Inject constructor(
     fun createFolder(name: String) {
         if (name.isBlank()) return
         viewModelScope.launch {
-            repository.createFolder(name)
-            onDialogDismiss()
+            try {
+
+                // --- АНАЛИТИКА ---
+                analytics.logEvent("folder_created", null)
+
+                repository.createFolder(name)
+                onDialogDismiss()
+            } catch (e: Exception) {
+                onDialogDismiss()
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
         }
     }
 }

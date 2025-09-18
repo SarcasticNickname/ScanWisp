@@ -1,7 +1,7 @@
 package com.myprojects.scanwisp.ui.screens.home
 
 import android.app.Activity
-import android.util.Log
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,26 +19,28 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DriveFileRenameOutline
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,24 +48,28 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.google.android.gms.ads.nativead.NativeAd
 import com.google.android.play.core.review.ReviewManagerFactory
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.data.local.DocumentRow
+import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ViewMode
 import com.myprojects.scanwisp.ui.components.EmptyState
+import com.myprojects.scanwisp.ui.components.ErrorDialog
+import com.myprojects.scanwisp.ui.components.ErrorState
 import com.myprojects.scanwisp.ui.components.FullScreenLoader
 import com.myprojects.scanwisp.ui.events.UiEvent
+import com.myprojects.scanwisp.ui.model.UiAction
 import com.myprojects.scanwisp.ui.navigation.Screen
 import com.myprojects.scanwisp.ui.screens.home.components.DocumentGrid
 import com.myprojects.scanwisp.ui.screens.home.components.DocumentListItem
@@ -78,6 +84,7 @@ import com.myprojects.scanwisp.ui.state.HomeScreenUiState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import timber.log.Timber
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,13 +94,18 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     widthSizeClass: WindowWidthSizeClass
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var tempFileToClean: File? by remember { mutableStateOf(null) }
+
+    val haptics = LocalHapticFeedback.current
+
+    var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
 
     val shareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -112,21 +124,91 @@ fun HomeScreen(
         tempFileToClean = null
     }
 
-    LaunchedEffect(key1 = true, key2 = activity) {
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.createNewDocument(uris)
+        }
+    }
+
+    val scannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val scanningResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            val pageUris = scanningResult?.pages?.map { it.imageUri }.orEmpty()
+
+            val cr = context.contentResolver
+            pageUris.forEach { uri ->
+                try {
+                    cr.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) { /* провайдер мог не дать persist */
+                }
+                try {
+                    context.grantUriPermission(
+                        context.packageName,
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) {
+                }
+            }
+
+            if (pageUris.isNotEmpty()) {
+                Timber.d("Scanner success. URIs received: $pageUris")
+                viewModel.createNewDocument(pageUris)
+            } else {
+                Timber.w("Scanner returned empty or null URI list.")
+            }
+
+        } else {
+            Toast.makeText(
+                context,
+                context.getString(R.string.toast_failed_to_get_images),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+
+    LaunchedEffect(key1 = true) {
         viewModel.uiEventFlow.collectLatest { event ->
             when (event) {
                 is UiEvent.ShowSnackbar -> {
-                    scope.launch {
-                        val result = snackbarHostState.showSnackbar(
-                            message = event.message,
-                            actionLabel = event.actionLabel
-                        )
-                        if (result == SnackbarResult.ActionPerformed) {
-                            if (event.actionLabel == context.getString(R.string.action_cancel)) {
-                                viewModel.undoDelete()
+                    if (event.actionLabel == "OPEN_GALLERY") {
+                        galleryLauncher.launch(arrayOf("image/*"))
+                        Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
+                    } else {
+                        scope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                message = event.message,
+                                actionLabel = event.actionLabel
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                if (event.actionLabel == context.getString(R.string.action_cancel)) {
+                                    viewModel.undoDelete()
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
                             }
                         }
                     }
+                }
+
+                is UiEvent.LaunchScanner -> {
+                    val req = IntentSenderRequest.Builder(event.intentSender)
+                        .setFillInIntent(
+                            Intent().addFlags(
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                            )
+                        )
+                        .build()
+                    scannerLauncher.launch(req)
                 }
 
                 is UiEvent.LaunchShareIntent -> {
@@ -147,10 +229,14 @@ fun HomeScreen(
                                 val reviewInfo = reviewManager.requestReviewFlow().await()
                                 reviewManager.launchReviewFlow(activity, reviewInfo)
                             } catch (e: Exception) {
-                                Log.e("InAppReview", "Failed to launch review flow", e)
+                                Timber.e(e, "Failed to launch review flow")
                             }
                         }
                     }
+                }
+
+                is UiEvent.ShowErrorDialog -> {
+                    errorToShowInDialog = event.error
                 }
 
                 else -> Unit
@@ -158,84 +244,18 @@ fun HomeScreen(
         }
     }
 
-    val scannerLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val scanningResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-                val pageUris = scanningResult?.pages?.map { it.imageUri }
-                if (!pageUris.isNullOrEmpty()) {
-                    viewModel.createNewDocument(pageUris)
-                } else {
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.toast_failed_to_get_images),
-                        Toast.LENGTH_SHORT
-                    )
-                        .show()
-                }
-            }
-        }
-
-    val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (!uris.isNullOrEmpty()) {
-            viewModel.createNewDocument(uris)
-        } else {
-            Toast.makeText(
-                context,
-                context.getString(R.string.toast_image_selection_cancelled),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
-
-    val scanner = GmsDocumentScanning.getClient(
-        GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true).setPageLimit(10)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build()
-    )
     val onScanClick: () -> Unit = {
         if (activity != null) {
-            try {
-                scanner.getStartScanIntent(activity)
-                    .addOnSuccessListener { intentSender ->
-                        scannerLauncher.launch(
-                            IntentSenderRequest.Builder(intentSender).build()
-                        )
-                    }
-                    .addOnFailureListener { e ->
-                        Toast.makeText(
-                            context,
-                            context.getString(
-                                R.string.toast_scanner_failed_opening_gallery,
-                                e.message
-                            ),
-                            Toast.LENGTH_LONG
-                        ).show()
-                        galleryLauncher.launch(arrayOf("image/*"))
-                    }
-            } catch (t: Throwable) {
-                Toast.makeText(
-                    context,
-                    context.getString(
-                        R.string.toast_scanner_unavailable_opening_gallery,
-                        t.message
-                    ),
-                    Toast.LENGTH_LONG
-                ).show()
-                galleryLauncher.launch(arrayOf("image/*"))
-            }
+            viewModel.onScanButtonClicked(activity)
         } else {
-            Log.e("HomeScreen", "Context is not an Activity, cannot start scanner.")
+            Timber.e("Context is not an Activity, cannot start scanner.")
         }
     }
 
-    val shareDialogState by viewModel.shareDialogState.collectAsState()
-    val showSortSheet by viewModel.showSortSheet.collectAsState()
-    val sortBy by viewModel.sortBy.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val shareDialogState by viewModel.shareDialogState.collectAsStateWithLifecycle()
+    val showSortSheet by viewModel.showSortSheet.collectAsStateWithLifecycle()
+    val sortBy by viewModel.sortBy.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     var showMoveDialogForSelection by remember { mutableStateOf(false) }
     var showMoveDialogForDocumentId by remember { mutableStateOf<String?>(null) }
     var showRenameDialogForDocumentId by remember { mutableStateOf<String?>(null) }
@@ -253,7 +273,7 @@ fun HomeScreen(
             val dataState = uiState as? HomeScreenUiState.Data
             HomeTopAppBar(
                 screenTitle = dataState?.screenTitle ?: stringResource(R.string.loading),
-                searchQuery = dataState?.searchQuery ?: "",
+                searchQuery = searchQuery,
                 onQueryChange = viewModel::onSearchQueryChanged,
                 scrollBehavior = scrollBehavior,
                 isSelectionMode = dataState?.isSelectionModeActive ?: false,
@@ -301,14 +321,10 @@ fun HomeScreen(
                 }
 
                 is HomeScreenUiState.Error -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = state.message,
-                            color = MaterialTheme.colorScheme.error,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
+                    ErrorState(
+                        error = state.error,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 is HomeScreenUiState.Data -> {
@@ -321,7 +337,8 @@ fun HomeScreen(
                         onRenameRequest = { documentId ->
                             showRenameDialogForDocumentId = documentId
                         },
-                        onMoveRequest = { documentId -> showMoveDialogForDocumentId = documentId }
+                        onMoveRequest = { documentId -> showMoveDialogForDocumentId = documentId },
+                        onHapticFeedback = { type -> haptics.performHapticFeedback(type) }
                     )
                 }
             }
@@ -353,7 +370,8 @@ fun HomeScreen(
 
     showRenameDialogForDocumentId?.let { documentId ->
         val currentDocument =
-            (uiState as? HomeScreenUiState.Data)?.documents?.find { it.id == documentId }
+            (uiState as? HomeScreenUiState.Data)?.items?.filterIsInstance<DocumentRow>()
+                ?.find { it.id == documentId }
         if (currentDocument != null) {
             RenameDialog(
                 currentTitle = currentDocument.title,
@@ -387,6 +405,52 @@ fun HomeScreen(
             }
         )
     }
+
+    errorToShowInDialog?.let { error ->
+        ErrorDialog(
+            error = error,
+            onDismiss = { errorToShowInDialog = null }
+        )
+    }
+}
+
+@Composable
+private fun rememberDocumentActions(
+    viewModel: HomeViewModel,
+    onRenameRequest: (String) -> Unit,
+    onMoveRequest: (String) -> Unit,
+    documentId: String
+): List<UiAction> {
+    return remember(documentId) {
+        listOf(
+            UiAction(
+                title = "Переименовать",
+                icon = Icons.Outlined.DriveFileRenameOutline,
+                onClick = { onRenameRequest(documentId) }
+            ),
+            UiAction(
+                title = "Переместить",
+                icon = Icons.AutoMirrored.Outlined.DriveFileMove,
+                onClick = { onMoveRequest(documentId) }
+            ),
+            UiAction(
+                title = "Поделиться",
+                icon = Icons.Outlined.Share,
+                onClick = { viewModel.onShareSingleDocument(documentId) }
+            ),
+            UiAction(
+                title = "Скачать",
+                icon = Icons.Outlined.FileDownload,
+                onClick = { viewModel.onDownloadSingleDocument(documentId) }
+            ),
+            UiAction(
+                title = "Удалить",
+                icon = Icons.Outlined.Delete,
+                onClick = { viewModel.deleteDocument(documentId) },
+                isDestructive = true
+            )
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -398,9 +462,12 @@ fun HomeScreenContent(
     widthSizeClass: WindowWidthSizeClass,
     onScanClick: () -> Unit,
     onRenameRequest: (String) -> Unit,
-    onMoveRequest: (String) -> Unit
+    onMoveRequest: (String) -> Unit,
+    onHapticFeedback: (HapticFeedbackType) -> Unit
 ) {
-    if (state.documents.isEmpty() && state.nativeAd == null) {
+
+
+    if (state.items.isEmpty()) {
         EmptyState(
             icon = Icons.Default.AutoStories,
             title = stringResource(R.string.empty_state_title_no_documents),
@@ -411,59 +478,59 @@ fun HomeScreenContent(
     } else {
         if (state.viewMode == ViewMode.GRID) {
             DocumentGrid(
-                documents = state.documents,
-                nativeAd = state.nativeAd,
-                adPosition = state.adPosition,
+                items = state.items,
                 selectedIds = state.selectedDocumentIds,
                 isSelectionMode = state.isSelectionModeActive,
                 onDocumentClick = { documentId ->
                     if (state.isSelectionModeActive) {
+                        onHapticFeedback(HapticFeedbackType.TextHandleMove)
                         viewModel.onDocumentClick(documentId)
                     } else {
                         navController.navigate(Screen.DocumentDetail.createRoute(documentId))
                     }
                 },
-                onDocumentLongClick = viewModel::onDocumentLongClick,
-                onRenameRequest = onRenameRequest,
-                onMoveRequest = onMoveRequest,
-                onShareRequest = viewModel::onShareSingleDocument,
-                onDownloadRequest = viewModel::onDownloadSingleDocument,
-                onDeleteRequest = viewModel::deleteDocument,
+                onDocumentLongClick = { documentId ->
+                    onHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.onDocumentLongClick(documentId)
+                },
+                documentActionsBuilder = { documentId ->
+                    rememberDocumentActions(
+                        viewModel,
+                        onRenameRequest,
+                        onMoveRequest,
+                        documentId
+                    )
+                },
                 widthSizeClass = widthSizeClass
             )
-        } else { // ViewMode.LIST
-            val listItems = remember(state.documents, state.nativeAd, state.adPosition) {
-                val items: MutableList<Any> = state.documents.toMutableList()
-                val adPosition = state.adPosition
-                if (state.nativeAd != null && items.size >= adPosition) {
-                    items.add(adPosition, state.nativeAd)
-                } else if (state.nativeAd != null && items.isNotEmpty()) {
-                    items.add(state.nativeAd)
-                } else if (state.nativeAd != null && items.isEmpty()) {
-                    items.add(state.nativeAd)
-                }
-                items
-            }
+        } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(
-                    items = listItems,
-                    key = { item -> if (item is DocumentRow) item.id else "ad_list_item" },
-                    contentType = { item -> if (item is DocumentRow) "doc" else "ad" }
-                ) { item ->
+                itemsIndexed(
+                    items = state.items,
+                    key = { index, item ->
+                        when (item) {
+                            is DocumentRow -> "doc-${item.id}"
+                            is NativeAd -> "ad-$index"
+                            else -> "other-$index"
+                        }
+                    },
+                    contentType = { _, item -> if (item is DocumentRow) "doc" else "ad" }
+                ) { _, item ->
                     when (item) {
                         is DocumentRow -> {
                             val documentId = item.id
-                            Box(modifier = Modifier.animateItemPlacement()) {
+                            Box(modifier = Modifier.animateItem()) {
                                 DocumentListItem(
                                     documentRow = item,
                                     isSelected = documentId in state.selectedDocumentIds,
                                     isSelectionMode = state.isSelectionModeActive,
                                     onClick = {
                                         if (state.isSelectionModeActive) {
+                                            onHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             viewModel.onDocumentClick(documentId)
                                         } else {
                                             navController.navigate(
@@ -473,16 +540,16 @@ fun HomeScreenContent(
                                             )
                                         }
                                     },
-                                    onLongClick = { viewModel.onDocumentLongClick(documentId) },
-                                    onRenameRequest = { onRenameRequest(documentId) },
-                                    onMoveRequest = { onMoveRequest(documentId) },
-                                    onShareRequest = { viewModel.onShareSingleDocument(documentId) },
-                                    onDownloadRequest = {
-                                        viewModel.onDownloadSingleDocument(
-                                            documentId
-                                        )
+                                    onLongClick = {
+                                        onHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.onDocumentLongClick(documentId)
                                     },
-                                    onDeleteRequest = { viewModel.deleteDocument(documentId) }
+                                    actions = rememberDocumentActions(
+                                        viewModel,
+                                        onRenameRequest,
+                                        onMoveRequest,
+                                        documentId
+                                    )
                                 )
                             }
                         }
@@ -490,7 +557,7 @@ fun HomeScreenContent(
                         is NativeAd -> {
                             NativeAdListItem(
                                 nativeAd = item,
-                                modifier = Modifier.animateItemPlacement()
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }

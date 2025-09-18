@@ -113,7 +113,7 @@ fun ExportBottomSheet(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Info,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.cd_icon_info),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
@@ -209,7 +209,7 @@ private fun FormatOption(
 
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = title,
             tint = contentColor
         )
         Spacer(Modifier.width(16.dp))

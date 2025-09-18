@@ -11,9 +11,7 @@ import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
 import com.myprojects.scanwisp.domain.model.ThemePreference
-// START: AI_MODIFIED_BLOCK
 import com.myprojects.scanwisp.domain.model.ViewMode
-// END: AI_MODIFIED_BLOCK
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -28,16 +26,18 @@ class SettingsRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : SettingsRepository {
 
+
     private object PreferencesKeys {
         val PDF_EXPORT_PROFILE = stringPreferencesKey("pdf_export_profile")
         val THEME_PREFERENCE = stringPreferencesKey("theme_preference")
         val SORT_BY = stringPreferencesKey("sort_by")
         val SORT_ORDER = stringPreferencesKey("sort_order")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
-
-        // START: AI_MODIFIED_BLOCK
         val VIEW_MODE = stringPreferencesKey("view_mode")
-        // END: AI_MODIFIED_BLOCK
+        val FIT_TO_A4 = booleanPreferencesKey("fit_to_a4")
+
+        // Вот недостающая строка:
+        val SORT_HINT_SHOWN = booleanPreferencesKey("sort_hint_shown")
     }
 
     override val pdfExportProfile: Flow<PdfExportProfile> = context.dataStore.data
@@ -117,14 +117,13 @@ class SettingsRepositoryImpl @Inject constructor(
         }
     }
 
-    // START: AI_MODIFIED_BLOCK
     override val viewMode: Flow<ViewMode> = context.dataStore.data
         .map { preferences ->
             val viewModeName = preferences[PreferencesKeys.VIEW_MODE] ?: ViewMode.GRID.name
             try {
                 ViewMode.valueOf(viewModeName)
             } catch (e: IllegalArgumentException) {
-                ViewMode.GRID // По умолчанию сетка
+                ViewMode.GRID
             }
         }
 
@@ -133,5 +132,26 @@ class SettingsRepositoryImpl @Inject constructor(
             preferences[PreferencesKeys.VIEW_MODE] = viewMode.name
         }
     }
-    // END: AI_MODIFIED_BLOCK
+
+    override val fitToA4: Flow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.FIT_TO_A4] ?: true
+        }
+
+    override suspend fun saveFitToA4(fit: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FIT_TO_A4] = fit
+        }
+    }
+
+    override val sortHintShown: Flow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SORT_HINT_SHOWN] ?: false
+        }
+
+    override suspend fun setSortHintShown(shown: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SORT_HINT_SHOWN] = shown
+        }
+    }
 }

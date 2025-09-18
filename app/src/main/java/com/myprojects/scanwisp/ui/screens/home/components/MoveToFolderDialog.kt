@@ -12,7 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -33,21 +34,20 @@ fun MoveToFolderDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        // START: AI_MODIFIED_BLOCK
         title = { Text(stringResource(R.string.dialog_move_title)) },
-        // END: AI_MODIFIED_BLOCK
         text = {
             LazyColumn {
                 // Опция для перемещения на главный экран (в корень)
-                item {
+                item(key = "no_folder_option") {
                     FolderSelectionItem(
-                        // START: AI_MODIFIED_BLOCK
                         name = stringResource(R.string.dialog_move_option_no_folder),
-                        // END: AI_MODIFIED_BLOCK
                         onClick = { onFolderSelected(null) })
-                    Divider()
+                    HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                 }
-                items(folders) { folder ->
+                items(
+                    items = folders,
+                    key = { folder -> folder.id }
+                ) { folder ->
                     FolderSelectionItem(
                         name = folder.name,
                         onClick = { onFolderSelected(folder.id) })
@@ -56,9 +56,7 @@ fun MoveToFolderDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismissRequest) {
-                // START: AI_MODIFIED_BLOCK
                 Text(stringResource(R.string.action_cancel))
-                // END: AI_MODIFIED_BLOCK
             }
         }
     )
@@ -73,7 +71,11 @@ private fun FolderSelectionItem(name: String, onClick: () -> Unit) {
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(24.dp))
+        Icon(
+            Icons.Default.Folder,
+            contentDescription = stringResource(R.string.cd_icon_folder),
+            modifier = Modifier.size(24.dp)
+        )
         Spacer(modifier = Modifier.width(16.dp))
         Text(text = name, style = MaterialTheme.typography.bodyLarge)
     }

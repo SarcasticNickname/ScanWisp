@@ -6,15 +6,19 @@ import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
 import com.myprojects.scanwisp.data.local.model.PageEntity
+import com.myprojects.scanwisp.domain.model.SortBy
+import com.myprojects.scanwisp.domain.model.SortOrder
 import kotlinx.coroutines.flow.Flow
 
 interface DocumentRepository {
-    /**
-     * ==========================================================
-     * ИЗМЕНЕНИЕ: Добавлен параметр `query` для поиска на стороне БД.
-     * ==========================================================
-     */
-    fun getDocumentRows(folderId: String?, query: String): Flow<List<DocumentRow>>
+
+    fun getDocumentRows(
+        folderId: String?,
+        query: String,
+        sortBy: SortBy,
+        sortOrder: SortOrder
+    ): Flow<List<DocumentRow>>
+
 
     fun getDocumentById(id: String): Flow<DocumentWithPages?>
     suspend fun createDocument(
@@ -37,6 +41,10 @@ interface DocumentRepository {
     suspend fun getFolderById(folderId: String): FolderEntity?
     fun getFoldersWithDocumentCount(): Flow<List<FolderWithDocumentCount>>
     suspend fun updateDocumentCover(documentId: String, newCoverPath: String)
+
+    fun getDeletedDocumentRows(): Flow<List<DocumentRow>>
+    suspend fun restoreDocument(documentId: String)
+    suspend fun deleteDocumentsPermanently(documentIds: List<String>)
 
     suspend fun mergeDocuments(documentIds: List<String>, newTitle: String, folderId: String?)
     suspend fun splitPagesIntoNewDocuments(

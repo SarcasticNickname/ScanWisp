@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -37,7 +38,7 @@ class FileManager @Inject constructor(
             }
             Uri.fromFile(destinationFile)
         } catch (e: Exception) {
-            Log.e(TAG, "Error copying file to app storage", e)
+            Timber.e(e, "Error copying file to app storage")
             null
         }
     }
