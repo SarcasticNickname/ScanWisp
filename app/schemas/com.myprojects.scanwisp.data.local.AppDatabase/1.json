@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "a70283f8e09e49ce742f22114a3b540e",
+    "identityHash": "10b399251ec3245ccbd965db4da3de96",
     "entities": [
       {
         "tableName": "documents",
@@ -128,7 +128,7 @@
       },
       {
         "tableName": "pages",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `documentOwnerId` TEXT NOT NULL, `pageNumber` INTEGER NOT NULL, `sourceImagePath` TEXT NOT NULL, `processedImagePath` TEXT NOT NULL, `thumbnailPath` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`documentOwnerId`) REFERENCES `documents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `documentOwnerId` TEXT NOT NULL, `pageNumber` INTEGER NOT NULL, `sourceImagePath` TEXT NOT NULL, `processedImagePath` TEXT NOT NULL, `thumbnailPath` TEXT NOT NULL, `position` INTEGER NOT NULL, `extractedText` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`documentOwnerId`) REFERENCES `documents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -171,6 +171,11 @@
             "columnName": "position",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "extractedText",
+            "columnName": "extractedText",
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -284,7 +289,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a70283f8e09e49ce742f22114a3b540e')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '10b399251ec3245ccbd965db4da3de96')"
     ]
   }
 }

@@ -33,5 +33,6 @@ data class PageEntity(
     val sourceImagePath: String,
     val processedImagePath: String,
     val thumbnailPath: String,
-    val position: Long
+    val position: Long,
+    val extractedText: String? = null // Текст может быть null, если еще не распознан
 )

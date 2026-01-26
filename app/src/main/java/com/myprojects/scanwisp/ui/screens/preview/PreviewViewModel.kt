@@ -13,6 +13,7 @@ import com.myprojects.scanwisp.core.storage.StorageService
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.StringProvider
+import com.myprojects.scanwisp.domain.use_case.RecognizePageUseCase
 import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.state.LoadingState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,6 +39,7 @@ class PreviewViewModel @Inject constructor(
     private val analytics: FirebaseAnalytics,
     private val crashlytics: FirebaseCrashlytics,
     private val storageService: StorageService,
+    private val recognizePageUseCase: RecognizePageUseCase
 ) : ViewModel() {
 
     private val pageId: String = checkNotNull(savedStateHandle["pageId"])
@@ -127,5 +129,34 @@ class PreviewViewModel @Inject constructor(
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.NotEnoughStorageError))
             }
         }
+    }
+
+    // Flow для показа текста
+    private val _recognizedText = MutableStateFlow<String?>(null)
+    val recognizedText = _recognizedText.asStateFlow()
+
+    fun onRecognizeTextClicked() {
+        viewModelScope.launch {
+            _loadingState.update { it.copy(isBusy = true, message = "Распознавание текста...") }
+            try {
+                val text = recognizePageUseCase(pageId)
+                if (text.isNotBlank()) {
+                    _recognizedText.value = text
+                    analytics.logEvent("ocr_success", null)
+                } else {
+                    _uiEventFlow.emit(UiEvent.ShowSnackbar("Текст не найден"))
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "OCR failed")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка распознавания")))
+            } finally {
+                _loadingState.update { it.copy(isBusy = false) }
+            }
+        }
+    }
+
+    fun dismissTextDialog() {
+        _recognizedText.value = null
     }
 }

@@ -35,17 +35,14 @@ android {
     }
 
     buildTypes {
-        // ====================================================================
-        // ИЗМЕНЕНО: Явно определяем `release` блок со всеми настройками.
-        // ====================================================================
         getByName("release") {
             isMinifyEnabled = true
-            isShrinkResources = true // ДОБАВЛЕНО: Включаем сжатие ресурсов
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // signingConfig = signingConfigs.getByName("release") // Раскомментируете, когда настроите signingConfigs
+            // signingConfig = signingConfigs.getByName("release") //когда будут signingConfigs
         }
 
         getByName("debug") {
@@ -144,6 +141,9 @@ dependencies {
     // --- PDF & Document Processing ---
     implementation(libs.pdfbox.android)
     implementation(libs.google.mlkit.scanner)
+
+    // --- OCR - распорзнавание речи ---
+    implementation(libs.tesseract4android)
 
     // --- Google Services ---
     implementation(libs.google.ads)
