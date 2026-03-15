@@ -2,8 +2,10 @@ package com.myprojects.scanwisp.data.repository
 
 import android.content.Context
 import android.net.Uri
+import androidx.sqlite.db.SimpleSQLiteQuery
 import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.DocumentRow
+import com.myprojects.scanwisp.data.local.PageSearchResult
 import com.myprojects.scanwisp.data.local.model.DocumentEntity
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
@@ -20,6 +22,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -35,24 +38,16 @@ class DocumentRepositoryImpl @Inject constructor(
 ) : DocumentRepository {
 
     private fun deleteFileFromPath(path: String?) {
-        if (path.isNullOrBlank() || path.isEmpty()) return
+        if (path.isNullOrBlank()) return
         try {
             val file = File(path)
-            if (file.exists()) {
-                file.delete()
-            }
+            if (file.exists()) file.delete()
         } catch (e: Exception) {
             Timber.e(e, "Failed to delete file at path: $path")
         }
     }
 
-    // Более надежная функция подготовки FTS-запроса
-    private fun prepareFtsQuery(raw: String): String =
-        raw.trim()
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-            .joinToString(" ") { "\"${it.replace("\"", "\"\"")}\"*" }
-
+    // Для title-search на HomeScreen: LIKE-запрос, ftsQuery не нужен
     override fun getDocumentRows(
         folderId: String?,
         query: String,
@@ -60,16 +55,56 @@ class DocumentRepositoryImpl @Inject constructor(
         sortOrder: SortOrder
     ): Flow<List<DocumentRow>> {
         val sortByStr = sortBy.name
-        val sortOrderStr = sortOrder.name
-
-        // Логика выбора нужного DAO-метода
+        val sortOrderStr = when (sortOrder) {
+            SortOrder.ASCENDING -> "ASC"
+            SortOrder.DESCENDING -> "DESC"
+        }
         return if (query.isBlank()) {
             dao.getDocumentRowsWithoutSearch(folderId, sortByStr, sortOrderStr)
         } else {
-            val ftsQuery = prepareFtsQuery(query)
-            dao.getDocumentRowsWithSearch(folderId, ftsQuery, sortByStr, sortOrderStr)
+            dao.getDocumentRowsWithSearch(folderId, query, sortByStr, sortOrderStr)
         }
     }
+
+    /**
+     * Полнотекстовый поиск по OCR-тексту страниц через FTS5.
+     * Каждое слово запроса разворачивается в prefix-match (word*),
+     * слова объединяются неявным AND.
+     */
+    override fun searchByContent(query: String): Flow<List<PageSearchResult>> {
+        if (query.isBlank()) return emptyFlow()
+        val ftsQuery = buildFts5Query(query)
+        val sql = """
+            SELECT
+                pages_fts.page_id            AS pageId,
+                pages_fts.document_owner_id   AS documentId,
+                pages_fts.page_number         AS pageNumber,
+                d.title                       AS documentTitle,
+                d.coverImagePath              AS coverImagePath,
+                snippet(pages_fts, 3, '<<', '>>', '…', 20) AS snippet
+            FROM pages_fts
+            JOIN documents d ON d.id = pages_fts.document_owner_id
+            WHERE pages_fts MATCH ?
+              AND d.deletionTimestamp IS NULL
+            ORDER BY rank
+            LIMIT 50
+        """.trimIndent()
+        return dao.searchPagesByContentRaw(SimpleSQLiteQuery(sql, arrayOf(ftsQuery)))
+    }
+
+    /**
+     * Строит FTS5-запрос: каждое слово → prefix-match «word*».
+     * Слова объединяются неявным AND в FTS5.
+     * Специальные символы FTS5 экранируются кавычками.
+     */
+    private fun buildFts5Query(raw: String): String =
+        raw.trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { word ->
+                // Экранируем кавычки внутри слова, оборачиваем в ""
+                "\"${word.replace("\"", "\"\"").replace("*", "")}\"*"
+            }
 
     override fun getDocumentById(id: String): Flow<DocumentWithPages?> {
         return dao.getDocumentWithPagesById(id)
@@ -79,8 +114,8 @@ class DocumentRepositoryImpl @Inject constructor(
         title: String,
         sourceUris: List<Uri>,
         folderId: String?
-    ) {
-        if (sourceUris.isEmpty()) return
+    ): String {
+        if (sourceUris.isEmpty()) return ""
 
         val processedPageData = coroutineScope {
             sourceUris.map { uri ->
@@ -126,6 +161,7 @@ class DocumentRepositoryImpl @Inject constructor(
             )
         }
         dao.insertDocumentAndPages(document, pages)
+        return documentId
     }
 
     override suspend fun renameDocument(documentId: String, newTitle: String) {
@@ -144,14 +180,15 @@ class DocumentRepositoryImpl @Inject constructor(
                 deleteFileFromPath(page.thumbnailPath)
             }
         }
+        dao.deleteFtsEntriesForDocument(documentId)
         dao.deleteDocumentById(documentId)
     }
 
     override suspend fun addPagesToDocument(
         documentId: String,
         sourceUris: List<Uri>
-    ) {
-        if (sourceUris.isEmpty()) return
+    ): String {
+        if (sourceUris.isEmpty()) return ""
 
         val processedPageData = coroutineScope {
             sourceUris.map { uri ->
@@ -190,6 +227,7 @@ class DocumentRepositoryImpl @Inject constructor(
             )
         }
         dao.insertPages(newPages)
+        return documentId
     }
 
     override suspend fun deletePages(pageIds: List<String>) {
@@ -222,6 +260,7 @@ class DocumentRepositoryImpl @Inject constructor(
             documentToUpdate = document.copy(coverImagePath = newCoverPath)
         }
 
+        dao.deleteFtsEntriesForPages(pageIds)
         dao.deletePagesAndHandleCoverUpdate(documentToUpdate, pageIds)
     }
 
@@ -329,7 +368,24 @@ class DocumentRepositoryImpl @Inject constructor(
             )
         }
 
+        // Удаляем старые FTS-записи ДО удаления документов
+        documentIds.forEach { docId ->
+            dao.deleteFtsEntriesForDocument(docId)
+        }
+
         dao.mergeDocumentsAndDeleteOld(newDocument, newPages, documentIds)
+
+        // Создаём новые FTS-записи для страниц с распознанным текстом
+        newPages.forEach { page ->
+            if (!page.extractedText.isNullOrBlank()) {
+                dao.upsertFtsPageEntry(
+                    pageId = page.id,
+                    documentOwnerId = page.documentOwnerId,
+                    pageNumber = page.pageNumber,
+                    text = page.extractedText
+                )
+            }
+        }
     }
 
     override suspend fun splitPagesIntoNewDocuments(
@@ -372,6 +428,18 @@ class DocumentRepositoryImpl @Inject constructor(
         }
         val remainingPageCount = dao.getPageCount(originalDocumentId) - pageIds.size
         dao.splitPagesFromDocument(newDocumentsAndPages, documentToUpdate, remainingPageCount == 0)
+
+        // Обновляем FTS-записи: страницы сохраняют свой id, но меняют documentOwnerId
+        newDocumentsAndPages.forEach { (newDoc, updatedPage) ->
+            if (!updatedPage.extractedText.isNullOrBlank()) {
+                dao.upsertFtsPageEntry(
+                    pageId = updatedPage.id,
+                    documentOwnerId = newDoc.id,
+                    pageNumber = updatedPage.pageNumber,
+                    text = updatedPage.extractedText
+                )
+            }
+        }
     }
 
     override fun getDeletedDocumentRows(): Flow<List<DocumentRow>> {
@@ -379,7 +447,7 @@ class DocumentRepositoryImpl @Inject constructor(
     }
 
     override suspend fun restoreDocument(documentId: String) {
-        val document = dao.getDocumentById(documentId)
+        val document = dao.getDocumentByIdAny(documentId)
         if (document != null) {
             // Восстанавливаем в оригинальную папку или в корень, если ее удалили
             val originalFolderExists = document.folderId?.let { dao.getFolderById(it) } != null
@@ -397,12 +465,16 @@ class DocumentRepositoryImpl @Inject constructor(
         // Сначала удаляем связанные файлы
         withContext(Dispatchers.IO) {
             documentIds.forEach { docId ->
-                val docWithPages = dao.getDocumentWithPagesById(docId).first()
+                val docWithPages = dao.getDocumentWithPagesByIdAny(docId).first()
                 docWithPages?.pages?.forEach { page ->
                     deleteFileFromPath(page.processedImagePath)
                     deleteFileFromPath(page.thumbnailPath)
                 }
             }
+        }
+        // Удаляем FTS-записи страниц для всех документов
+        documentIds.forEach { docId ->
+            dao.deleteFtsEntriesForDocument(docId)
         }
         // Затем удаляем записи из БД
         dao.deleteDocumentsByIds(documentIds)

@@ -100,8 +100,8 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
     val onFinish = {
         viewModel.onOnboardingFinished()
-        navController.navigate(Screen.Home.route) {
-            popUpTo(Screen.Router.route) { inclusive = true }
+        navController.navigate(Screen.Home.createRoute()) {
+            popUpTo(Screen.Onboarding.route) { inclusive = true }
         }
     }
 

@@ -25,7 +25,8 @@ class ExportDocumentUseCase @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val pdfExportService: PdfExportService,
     private val zipExportService: ZipExportService,
-    private val jpegExportService: JpegExportService
+    private val jpegExportService: JpegExportService,
+    private val safeNamePolicy: SafeNamePolicy
 ) {
     /**
      * Выполняет экспорт указанных страниц в файл заданного формата.
@@ -54,17 +55,19 @@ class ExportDocumentUseCase @Inject constructor(
         }
 
         // 2. Нормализуем базовое имя единообразно для всех форматов
-        val policy = SafeNamePolicy(context)
-        val baseName = policy.exportBaseNameFromTitle(displayName, pageCount = imagePaths.size)
+        val baseName = safeNamePolicy.exportBaseNameFromTitle(displayName, pageCount = imagePaths.size)
 
         // 3. В зависимости от формата, вызываем соответствующий сервис
         val tempFile = when (format) {
 
             ExportFormat.PDF -> {
                 val exportProfile = settingsRepository.pdfExportProfile.first()
-                val fitToA4 = settingsRepository.fitToA4.first() // <-- ПОЛУЧАЕМ НАСТРОЙКУ
+                val fitToA4 = settingsRepository.fitToA4.first()
                 pdfExportService.exportToPdf(
-                    imagePaths, baseName, exportProfile, fitToA4
+                    pages   = pagesToExport,
+                    title   = baseName,
+                    profile = exportProfile,
+                    fitToA4 = fitToA4
                 )
             }
 

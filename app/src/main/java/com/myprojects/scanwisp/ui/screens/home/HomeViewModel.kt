@@ -7,6 +7,11 @@ import androidx.core.os.bundleOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -32,6 +37,7 @@ import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.state.HomeScreenUiState
 import com.myprojects.scanwisp.ui.state.LoadingState
 import com.myprojects.scanwisp.utils.SafeNamePolicy
+import com.myprojects.scanwisp.worker.OcrWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -86,6 +92,7 @@ class HomeViewModel @Inject constructor(
     private val analytics: FirebaseAnalytics,
     private val crashlytics: FirebaseCrashlytics,
     private val storageService: StorageService,
+    private val workManager: WorkManager
 ) : ViewModel() {
 
     private val searchQueryKey = "homeSearchQuery"
@@ -142,10 +149,6 @@ class HomeViewModel @Inject constructor(
 
     init {
         crashlytics.setCustomKey("current_screen", if (folderId == null) "home" else "folder_view")
-
-        _selectedDocumentIds
-            .onEach { ids -> savedStateHandle[selectedIdsKey] = ids }
-            .launchIn(viewModelScope)
 
         // -------- 1) ПОТОК ТОЛЬКО ДЛЯ ДОКУМЕНТОВ (с debounce) --------
         @OptIn(FlowPreview::class)
@@ -417,10 +420,6 @@ class HomeViewModel @Inject constructor(
             val operationDir = storageService.appFilesDir()
 
             var reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            if (reservation == null) {
-                storageService.clearExportCache()
-                reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            }
 
             reservation?.use { _ ->
                 try {
@@ -428,7 +427,7 @@ class HomeViewModel @Inject constructor(
                     val title = safeNamePolicy.newDocumentTitle()
 
                     Timber.d("ViewModel: Attempting to create document...")
-                    documentRepository.createDocument(title, uris, folderId)
+                    val documentId = documentRepository.createDocument(title, uris, folderId)
                     Timber.d("ViewModel: Document creation call finished.")
 
                     val firstUri = uris.firstOrNull()?.toString() ?: ""
@@ -449,6 +448,24 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private fun enqueueOcr(documentId: String, documentTitle: String) {
+        val inputData = workDataOf(
+            OcrWorker.KEY_DOCUMENT_ID to documentId,
+            OcrWorker.KEY_DOCUMENT_TITLE to documentTitle
+        )
+        val request = OneTimeWorkRequestBuilder<OcrWorker>()
+            .setInputData(inputData)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag("ocr_$documentId")
+            .build()
+
+        workManager.enqueueUniqueWork(
+            "ocr_$documentId",
+            ExistingWorkPolicy.KEEP,
+            request
+        )
+    }
+
     fun deleteDocument(documentId: String) = initiateDelete(listOf(documentId))
 
     fun deleteSelectedDocuments() {
@@ -457,19 +474,18 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    suspend fun undoDelete() {
-        try {
-            val idsToUndo = _documentsPendingUndo.value
-            if (idsToUndo.isEmpty()) return
-
-            viewModelScope.launch {
+    fun undoDelete() {
+        viewModelScope.launch {
+            try {
+                val idsToUndo = _documentsPendingUndo.value
+                if (idsToUndo.isEmpty()) return@launch
                 deleteDocumentsUseCase.undo(idsToUndo)
                 _documentsPendingUndo.value = emptyList()
                 _uiEventFlow.emit(UiEvent.ShowSnackbar("Удаление отменено"))
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to undo deletion")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to undo deletion")
-            _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
         }
     }
 
@@ -477,6 +493,9 @@ class HomeViewModel @Inject constructor(
         if (documentIds.isEmpty()) return
 
         analytics.logEvent("documents_deleted", bundleOf("count" to documentIds.size.toLong()))
+
+        // Если есть предыдущие pending-документы, на которые пользователь не нажал undo,
+        // считаем удаление подтверждённым — очищаем старый список
         _documentsPendingUndo.value = documentIds
 
         viewModelScope.launch {

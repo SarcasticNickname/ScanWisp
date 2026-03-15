@@ -28,6 +28,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -149,6 +150,26 @@ fun DocumentCard(
                             .background(MaterialTheme.colorScheme.primary, CircleShape)
                             .padding(4.dp)
                     )
+                }
+                if (!isSelected && documentRow.ocrDoneCount < documentRow.pageCount) {
+                    val isProcessing = documentRow.ocrDoneCount > 0
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp),
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
+                    ) {
+                        Text(
+                            text = if (isProcessing)
+                                "${documentRow.ocrDoneCount}/${documentRow.pageCount}"
+                            else
+                                stringResource(R.string.ocr_status_not_recognized),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
                 }
             }
 

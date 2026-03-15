@@ -158,7 +158,9 @@ fun FoldersScreen(
                                                 analytics.logEvent("folder_opened", null)
                                                 navController.navigate(
                                                     Screen.Home.createRouteWithFolder(item.folder.id)
-                                                )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
                                             },
                                             modifier = Modifier.animateItem()
                                         )

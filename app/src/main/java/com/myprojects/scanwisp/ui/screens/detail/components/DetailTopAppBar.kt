@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
@@ -50,7 +51,8 @@ internal fun DefaultTopAppBar(
     onSortClick: () -> Unit,
     onTitleClick: () -> Unit,
     onShareClick: () -> Unit,
-    onMoveClick: () -> Unit
+    onMoveClick: () -> Unit,
+    onOcrClick: () -> Unit
 ) {
     TopAppBar(
         title = {
@@ -81,6 +83,12 @@ internal fun DefaultTopAppBar(
             }
         },
         actions = {
+            IconButton(onClick = onOcrClick) {
+                Icon(
+                    Icons.Default.DocumentScanner,
+                    contentDescription = stringResource(R.string.detail_top_bar_cd_ocr)
+                )
+            }
             IconButton(onClick = onShareClick) {
                 Icon(
                     Icons.Default.Share,
@@ -114,6 +122,7 @@ internal fun SelectionTopAppBar(
     onDeleteSelected: () -> Unit,
     onExportSelected: () -> Unit,
     onSplitSelected: () -> Unit,
+    onOcrSelected: () -> Unit,
     canSplit: Boolean
 ) {
     TopAppBar(
@@ -157,6 +166,12 @@ internal fun SelectionTopAppBar(
             }
         },
         actions = {
+            IconButton(onClick = onOcrSelected) {
+                Icon(
+                    Icons.Default.DocumentScanner,
+                    contentDescription = stringResource(R.string.detail_selection_bar_cd_ocr)
+                )
+            }
             if (canSplit) {
                 IconButton(onClick = onSplitSelected) {
                     Icon(

@@ -3,8 +3,6 @@ package com.myprojects.scanwisp.data.local.model
 import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.ForeignKey
-import androidx.room.Fts4
-import androidx.room.FtsOptions
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
@@ -40,12 +38,4 @@ data class DocumentEntity(
     val deletionTimestamp: Long? = null
 )
 
-@Entity(tableName = "documents_fts")
-@Fts4(
-    contentEntity = DocumentEntity::class,
-    tokenizer = FtsOptions.TOKENIZER_UNICODE61,
-    prefix = [2, 3, 4]
-)
-data class DocumentFtsEntity(
-    val title: String,
-)
+// documents_fts создаётся вручную в миграции как FTS5-таблица (см. AppDatabaseMigrations.kt)

@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.myprojects.scanwisp.worker.CacheCleanupWorker
 import com.myprojects.scanwisp.worker.GarbageCollectorWorker
+import com.myprojects.scanwisp.worker.OcrNotificationHelper
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
@@ -28,6 +29,7 @@ class ScanWispApp : Application(), Configuration.Provider {
         }
 
         setupRecurringWork()
+        OcrNotificationHelper.createChannel(this)
     }
 
     override val workManagerConfiguration: Configuration

@@ -31,8 +31,23 @@
 
     <!-- Bottom Navigation -->
     <string name="bottom_nav_home">Главная</string>
+    <string name="bottom_nav_search">Поиск</string>
     <string name="bottom_nav_folders">Папки</string>
     <string name="bottom_nav_settings">Настройки</string>
+
+    <!-- OCR mode -->
+    <string name="preview_action_improve_ocr">Улучшить распознавание (Full)</string>
+    <string name="detail_page_menu_recognize_fast">Распознать текст (быстро)</string>
+    <string name="detail_page_menu_recognize_full">Распознать текст (точно)</string>
+    <string name="ocr_status_not_recognized">Не распознан</string>
+
+    <!-- OCR Notifications -->
+    <string name="ocr_notification_channel_name">Распознавание текста</string>
+    <string name="ocr_notification_channel_desc">Прогресс OCR при обработке документов</string>
+    <string name="ocr_notification_title">Распознавание текста…</string>
+    <string name="ocr_notification_progress">«%1$s» — страница %2$d из %3$d</string>
+    <string name="ocr_notification_done_title">Текст распознан</string>
+    <string name="ocr_notification_done_text">«%1$s» — %2$d стр.</string>
 
     <!-- HomeScreen & Components -->
     <string name="home_screen_title_default">Мои документы</string>
@@ -207,8 +222,16 @@
     <string name="error_dialog_message_general">Произошла непредвиденная ошибка. Пожалуйста, попробуйте еще раз.</string>
 
 
-    <!-- Bottom Navigation -->
-    <string name="bottom_nav_trash">Корзина</string>
+    <!-- Search Screen -->
+    <string name="search_content_placeholder">Поиск по тексту документов…</string>
+    <string name="search_content_hint">Введите запрос для поиска по распознанному тексту</string>
+    <string name="search_cd_back">Назад</string>
+    <string name="search_cd_clear">Очистить запрос</string>
+    <string name="search_result_page_label">Стр. %1$d</string>
+    <string name="search_no_results_title">Ничего не найдено</string>
+    <string name="search_no_results_subtitle">По запросу «%1$s» совпадений не найдено.\nПопробуйте другое слово или сначала запустите распознавание текста.</string>
+
+
 
     <!-- Trash Screen -->
     <string name="trash_screen_title">Корзина</string>
@@ -223,5 +246,20 @@
     <string name="trash_action_delete_forever">Удалить навсегда</string>
     <string name="confirmation_dialog_ok">OK</string>
     <string name="error_dialog_go_to_trash">Перейти в корзину</string>
+    <string name="bottom_nav_trash">Корзина</string>
+
+
+
+    <string name="settings_category_ocr">Распознавание текста</string>
+    <string name="settings_item_ocr_language">Язык распознавания</string>
+    <string name="settings_dialog_title_ocr_language">Выберите язык OCR</string>
+    <string name="ocr_language_russian">Русский</string>
+    <string name="ocr_language_english">English</string>
+    <string name="ocr_language_both">Русский + English</string>
+
+    <string name="detail_top_bar_cd_ocr">Распознать текст</string>
+    <string name="detail_selection_bar_cd_ocr">Распознать выбранные</string>
+
+
 
 </resources>

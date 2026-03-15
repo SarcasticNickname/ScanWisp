@@ -127,6 +127,7 @@ dependencies {
 
     // --- Room (Database) ---
     implementation(libs.bundles.room)
+    implementation(libs.androidx.sqlite.bundled)
     ksp(libs.androidx.room.compiler)
 
     // --- Data & Storage ---

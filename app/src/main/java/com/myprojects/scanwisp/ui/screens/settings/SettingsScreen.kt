@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material.icons.outlined.BrightnessMedium
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -49,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.domain.model.AppError
+import com.myprojects.scanwisp.domain.model.OcrLanguage
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.ThemePreference
 import com.myprojects.scanwisp.ui.components.ErrorDialog
@@ -63,11 +65,11 @@ fun SettingsScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    // ИЗМЕНЕНИЕ: Получаем одно состояние экрана
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var showThemeDialog by remember { mutableStateOf(false) }
     var showPdfProfileDialog by remember { mutableStateOf(false) }
+    var showOcrLanguageDialog by remember { mutableStateOf(false) }
 
     var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
 
@@ -117,6 +119,7 @@ fun SettingsScreen(
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 ) {
+                    // --- Основные ---
                     SettingsCategory(stringResource(R.string.settings_category_main))
                     SettingsItem(
                         icon = Icons.Outlined.BrightnessMedium,
@@ -137,7 +140,21 @@ fun SettingsScreen(
                         checked = settings.fitToA4,
                         onCheckedChange = viewModel::onFitToA4Changed
                     )
+
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                    // --- Распознавание текста ---
+                    SettingsCategory(stringResource(R.string.settings_category_ocr))
+                    SettingsItem(
+                        icon = Icons.Outlined.Translate,
+                        title = stringResource(R.string.settings_item_ocr_language),
+                        subtitle = settings.defaultOcrLanguage.toReadableString(),
+                        onClick = { showOcrLanguageDialog = true }
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                    // --- О приложении ---
                     SettingsCategory(stringResource(R.string.settings_category_about))
                     SettingsItem(
                         icon = Icons.Outlined.Info,
@@ -146,32 +163,46 @@ fun SettingsScreen(
                     )
                 }
 
+                // Диалог темы
                 if (showThemeDialog) {
                     SettingsRadioDialog(
                         title = stringResource(R.string.settings_dialog_title_theme),
                         options = ThemePreference.entries.toList(),
                         selectedOption = settings.themePreference,
                         onOptionSelected = {
-                            viewModel.onThemeSelected(it)
-                            showThemeDialog = false
+                            viewModel.onThemeSelected(it); showThemeDialog = false
                         },
                         onDismissRequest = { showThemeDialog = false },
                         optionToReadableString = { it.toReadableString() }
                     )
                 }
 
+                // Диалог качества PDF
                 if (showPdfProfileDialog) {
                     SettingsRadioDialog(
                         title = stringResource(R.string.settings_dialog_title_pdf),
                         options = PdfExportProfile.entries.toList(),
                         selectedOption = settings.pdfExportProfile,
                         onOptionSelected = {
-                            viewModel.onProfileSelected(it)
-                            showPdfProfileDialog = false
+                            viewModel.onProfileSelected(it); showPdfProfileDialog = false
                         },
                         onDismissRequest = { showPdfProfileDialog = false },
                         optionToReadableString = { it.toReadableString() },
                         optionToDescription = { it.getDescription() }
+                    )
+                }
+
+                // Диалог языка OCR
+                if (showOcrLanguageDialog) {
+                    SettingsRadioDialog(
+                        title = stringResource(R.string.settings_dialog_title_ocr_language),
+                        options = OcrLanguage.entries.toList(),
+                        selectedOption = settings.defaultOcrLanguage,
+                        onOptionSelected = {
+                            viewModel.onOcrLanguageSelected(it); showOcrLanguageDialog = false
+                        },
+                        onDismissRequest = { showOcrLanguageDialog = false },
+                        optionToReadableString = { it.toReadableString() }
                     )
                 }
             }
@@ -194,6 +225,8 @@ fun SettingsScreen(
         )
     }
 }
+
+// ─── Компоненты ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun SettingsCategory(title: String) {
@@ -340,6 +373,7 @@ private fun <T> SettingsRadioDialog(
     }
 }
 
+// ─── Extension functions ──────────────────────────────────────────────────────
 
 @Composable
 private fun ThemePreference.toReadableString(): String = when (this) {
@@ -364,4 +398,11 @@ private fun PdfExportProfile.getDescription(): String = when (this) {
     PdfExportProfile.SMALL -> stringResource(R.string.settings_pdf_quality_small_desc)
     PdfExportProfile.BALANCED -> stringResource(R.string.settings_pdf_quality_balanced_desc)
     PdfExportProfile.HIGH -> stringResource(R.string.settings_pdf_quality_high_desc)
+}
+
+@Composable
+private fun OcrLanguage.toReadableString(): String = when (this) {
+    OcrLanguage.RUSSIAN -> stringResource(R.string.ocr_language_russian)
+    OcrLanguage.ENGLISH -> stringResource(R.string.ocr_language_english)
+    OcrLanguage.RUSSIAN_ENGLISH -> stringResource(R.string.ocr_language_both)
 }

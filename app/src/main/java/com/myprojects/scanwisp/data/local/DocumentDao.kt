@@ -5,13 +5,17 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
+import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.myprojects.scanwisp.data.local.model.DocumentEntity
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
 import com.myprojects.scanwisp.data.local.model.PageEntity
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import kotlinx.coroutines.flow.Flow
 
 @Immutable
@@ -21,13 +25,14 @@ data class DocumentRow(
     val coverImagePath: String,
     val creationTimestamp: Long,
     val pageCount: Int,
-    val folderId: String?
+    val folderId: String?,
+    val ocrDoneCount: Int
 )
 
 @Dao
 interface DocumentDao {
 
-    // --- Операции с Папками (без изменений) ---
+    // --- Папки ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolder(folder: FolderEntity)
@@ -42,38 +47,40 @@ interface DocumentDao {
     fun getAllFolders(): Flow<List<FolderEntity>>
 
     @Transaction
-    @Query(
-        """
-        SELECT *, (SELECT COUNT(id) FROM documents WHERE folderId = folders.id AND deletionTimestamp IS NULL) as documentCount
+    @Query("""
+        SELECT *,
+            (SELECT COUNT(id) FROM documents
+             WHERE folderId = folders.id AND deletionTimestamp IS NULL) as documentCount
         FROM folders
         ORDER BY creationTimestamp DESC
-    """
-    )
+    """)
     fun getAllFoldersWithDocumentCount(): Flow<List<FolderWithDocumentCount>>
 
     @Query("SELECT * FROM folders WHERE id = :folderId")
     suspend fun getFolderById(folderId: String): FolderEntity?
 
 
-    // --- Операции с Документами ---
+    // --- Документы ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: DocumentEntity)
 
-
-    // НОВЫЙ МЕТОД: Для получения документов БЕЗ поискового запроса
+    /** Список документов БЕЗ поискового фильтра */
     @Transaction
     @Query("""
-        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
-               IFNULL(p.pageCount, 0) AS pageCount
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId, 
+               IFNULL(p.pageCount, 0) AS pageCount,
+               IFNULL(p.ocrDoneCount, 0) AS ocrDoneCount
         FROM documents d
         LEFT JOIN (
-            SELECT documentOwnerId, COUNT(id) AS pageCount
+            SELECT documentOwnerId,
+                   COUNT(id) AS pageCount,
+                   SUM(CASE WHEN ocrStatus = 'DONE' OR (extractedText IS NOT NULL AND extractedText != '') THEN 1 ELSE 0 END) AS ocrDoneCount
             FROM pages GROUP BY documentOwnerId
         ) p ON d.id = p.documentOwnerId
         WHERE
-            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL)) AND
-            d.deletionTimestamp IS NULL
+            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL))
+            AND d.deletionTimestamp IS NULL
         ORDER BY
             CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'ASC'  THEN d.creationTimestamp END ASC,
             CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'DESC' THEN d.creationTimestamp END DESC,
@@ -86,21 +93,23 @@ interface DocumentDao {
         sortOrder: String
     ): Flow<List<DocumentRow>>
 
-    // НОВЫЙ МЕТОД: Для получения документов С поисковым запросом FTS
+    /** Поиск по названию через LIKE — substring, регистронезависимый */
     @Transaction
     @Query("""
         SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
-               IFNULL(p.pageCount, 0) AS pageCount
-        FROM documents_fts fts
-        JOIN documents d ON d.pk = fts.rowid
+               IFNULL(p.pageCount, 0) AS pageCount,
+               IFNULL(p.ocrDoneCount, 0) AS ocrDoneCount
+        FROM documents d
         LEFT JOIN (
-            SELECT documentOwnerId, COUNT(id) AS pageCount
+            SELECT documentOwnerId,
+                   COUNT(id) AS pageCount,
+                   SUM(CASE WHEN ocrStatus = 'DONE' OR (extractedText IS NOT NULL AND extractedText != '') THEN 1 ELSE 0 END) AS ocrDoneCount
             FROM pages GROUP BY documentOwnerId
         ) p ON d.id = p.documentOwnerId
         WHERE
-            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL)) AND
-            d.deletionTimestamp IS NULL AND
-            documents_fts MATCH :ftsQuery
+            (d.folderId = :folderId OR (:folderId IS NULL AND d.folderId IS NULL))
+            AND d.deletionTimestamp IS NULL
+            AND d.title LIKE '%' || :query || '%'
         ORDER BY
             CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'ASC'  THEN d.creationTimestamp END ASC,
             CASE WHEN :sortBy = 'DATE' AND :sortOrder = 'DESC' THEN d.creationTimestamp END DESC,
@@ -109,26 +118,26 @@ interface DocumentDao {
     """)
     fun getDocumentRowsWithSearch(
         folderId: String?,
-        ftsQuery: String,
+        query: String,
         sortBy: String,
         sortOrder: String
     ): Flow<List<DocumentRow>>
 
     @Transaction
-    @Query(
-        """
+    @Query("""
         SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.folderId,
-               IFNULL(p.pageCount, 0) as pageCount
+               IFNULL(p.pageCount, 0) as pageCount,
+               IFNULL(p.ocrDoneCount, 0) as ocrDoneCount
         FROM documents d
         LEFT JOIN (
-            SELECT documentOwnerId, COUNT(id) as pageCount
-            FROM pages
-            GROUP BY documentOwnerId
+            SELECT documentOwnerId,
+                   COUNT(id) as pageCount,
+                   SUM(CASE WHEN ocrStatus = 'DONE' OR (extractedText IS NOT NULL AND extractedText != '') THEN 1 ELSE 0 END) AS ocrDoneCount
+            FROM pages GROUP BY documentOwnerId
         ) p ON d.id = p.documentOwnerId
         WHERE d.deletionTimestamp IS NOT NULL
         ORDER BY d.deletionTimestamp DESC
-    """
-    )
+    """)
     fun getDeletedDocumentRows(): Flow<List<DocumentRow>>
 
     @Query("UPDATE documents SET deletionTimestamp = NULL, folderId = :folderId WHERE id = :documentId")
@@ -166,7 +175,7 @@ interface DocumentDao {
     suspend fun deleteDocumentsByIds(documentIds: List<String>)
 
 
-    // --- Операции со Страницами ---
+    // --- Страницы ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPages(pages: List<PageEntity>)
@@ -195,8 +204,70 @@ interface DocumentDao {
     @Query("DELETE FROM pages WHERE id IN (:pageIds)")
     suspend fun deletePagesByIds(pageIds: List<String>)
 
+    @Query("SELECT * FROM pages WHERE documentOwnerId = :documentId AND ocrStatus = 'PENDING' ORDER BY position ASC")
+    suspend fun getPendingPagesForDocument(documentId: String): List<PageEntity>
 
-    // --- Транзакционные операции ---
+    @Query("UPDATE pages SET ocrStatus = :status WHERE id = :pageId")
+    suspend fun updatePageOcrStatus(pageId: String, status: OcrStatus)
+
+
+    // --- FTS5 pages_fts: синхронизация ---
+    // @SkipQueryVerification отключает compile-time проверку схемы для виртуальной таблицы,
+    // не зарегистрированной как Room entity.
+
+    @SkipQueryVerification
+    @Query("DELETE FROM pages_fts WHERE page_id = :pageId")
+    suspend fun deleteFtsPageEntry(pageId: String)
+
+    @SkipQueryVerification
+    @Query("""
+        INSERT INTO pages_fts(page_id, document_owner_id, page_number, extracted_text)
+        VALUES (:pageId, :documentOwnerId, :pageNumber, :text)
+    """)
+    suspend fun insertFtsPageEntry(
+        pageId: String,
+        documentOwnerId: String,
+        pageNumber: Int,
+        text: String
+    )
+
+    @Transaction
+    suspend fun upsertFtsPageEntry(
+        pageId: String,
+        documentOwnerId: String,
+        pageNumber: Int,
+        text: String
+    ) {
+        deleteFtsPageEntry(pageId)
+        insertFtsPageEntry(pageId, documentOwnerId, pageNumber, text)
+    }
+
+    /** Удаляем все FTS-записи страниц документа (при удалении документа) */
+    @SkipQueryVerification
+    @Query("DELETE FROM pages_fts WHERE document_owner_id = :documentId")
+    suspend fun deleteFtsEntriesForDocument(documentId: String)
+
+    /** Удаляем FTS-записи конкретных страниц (при удалении страниц) */
+    @SkipQueryVerification
+    @Query("DELETE FROM pages_fts WHERE page_id IN (:pageIds)")
+    suspend fun deleteFtsEntriesForPages(pageIds: List<String>)
+
+
+    // --- FTS5 pages_fts: полнотекстовый поиск ---
+    // Запрос строится в DocumentRepositoryImpl, передаётся как SimpleSQLiteQuery.
+    // observedEntities → Flow автоматически переиздаётся при изменении pages или documents.
+    @RawQuery(observedEntities = [PageEntity::class, DocumentEntity::class])
+    fun searchPagesByContentRaw(query: SupportSQLiteQuery): Flow<List<PageSearchResult>>
+
+    @Query("SELECT * FROM documents WHERE id = :documentId LIMIT 1")
+    suspend fun getDocumentByIdAny(documentId: String): DocumentEntity?
+
+    @Transaction
+    @Query("SELECT * FROM documents WHERE id = :documentId")
+    fun getDocumentWithPagesByIdAny(documentId: String): Flow<DocumentWithPages?>
+
+
+    // --- Транзакции ---
 
     @Transaction
     suspend fun insertDocumentAndPages(document: DocumentEntity, pages: List<PageEntity>) {
@@ -240,4 +311,5 @@ interface DocumentDao {
             updateDocument(originalDocumentToUpdate)
         }
     }
+
 }

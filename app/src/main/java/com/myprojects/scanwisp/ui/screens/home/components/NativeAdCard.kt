@@ -1,5 +1,3 @@
-// Файл: ui/screens/home/components/NativeAdCard.kt
-
 package com.myprojects.scanwisp.ui.screens.home.components
 
 import android.view.View
@@ -23,7 +21,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,18 +38,6 @@ import com.myprojects.scanwisp.R
 
 @Composable
 fun NativeAdCard(nativeAd: NativeAd) {
-    /**
-     * ==========================================================
-     * ИЗМЕНЕНИЕ: Добавлен DisposableEffect.
-     * Гарантирует, что `nativeAd.destroy()` будет вызван, когда
-     * Composable покидает композицию, предотвращая утечки памяти.
-     * ==========================================================
-     */
-    DisposableEffect(nativeAd) {
-        onDispose {
-            nativeAd.destroy()
-        }
-    }
 
     Card(
         modifier = Modifier.aspectRatio(0.7f),

@@ -3,9 +3,13 @@ package com.myprojects.scanwisp.di
 import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
+import androidx.work.WorkManager
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.myprojects.scanwisp.data.local.AppDatabase
+import com.myprojects.scanwisp.data.local.AppDatabaseMigrations
 import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.model.PredefinedFolders
 import com.myprojects.scanwisp.utils.ImageCompressionService
@@ -29,14 +33,23 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         val roomCallback = object : RoomDatabase.Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                // Этот колбэк вызывается только при первом создании БД.
-                // Он создаст предопределенную папку "Архив".
-                db.execSQL(
+            override fun onCreate(connection: SQLiteConnection) {
+                super.onCreate(connection)
+                connection.execSQL(
                     """
                     INSERT INTO folders (id, name, creationTimestamp) 
                     VALUES ('${PredefinedFolders.ARCHIVE_FOLDER_ID}', '${PredefinedFolders.ARCHIVE_FOLDER_NAME}', 0)
+                    """
+                )
+                connection.execSQL(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+                        page_id            UNINDEXED,
+                        document_owner_id  UNINDEXED,
+                        page_number        UNINDEXED,
+                        extracted_text,
+                        tokenize='unicode61 remove_diacritics 1'
+                    )
                     """
                 )
             }
@@ -48,6 +61,8 @@ object AppModule {
             "scanwisp_db"
         )
             .addCallback(roomCallback)
+            .addMigrations(AppDatabaseMigrations.MIGRATION_1_2)
+            .setDriver(BundledSQLiteDriver())
             .build()
     }
 
@@ -95,4 +110,9 @@ object AppModule {
     fun provideImageCompressionService(): ImageCompressionService {
         return ImageCompressionService()
     }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager =
+        WorkManager.getInstance(context)
 }

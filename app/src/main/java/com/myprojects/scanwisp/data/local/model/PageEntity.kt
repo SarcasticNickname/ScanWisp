@@ -7,6 +7,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import java.util.UUID
 
 @Immutable
@@ -34,5 +35,8 @@ data class PageEntity(
     val processedImagePath: String,
     val thumbnailPath: String,
     val position: Long,
-    val extractedText: String? = null // Текст может быть null, если еще не распознан
+    val extractedText: String? = null,
+    val wordBoxesJson: String? = null,      // JSON от Tesseract для PDF-слоя
+    val isTextUserEdited: Boolean = false,   // пользователь редактировал вручную
+    val ocrStatus: OcrStatus = OcrStatus.PENDING
 )

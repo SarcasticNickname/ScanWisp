@@ -1,7 +1,10 @@
 package com.myprojects.scanwisp.ui.screens.detail
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -52,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
@@ -59,6 +63,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.data.local.model.PageEntity
 import com.myprojects.scanwisp.domain.model.AppError
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.ui.components.ErrorDialog
 import com.myprojects.scanwisp.ui.components.ErrorState
 import com.myprojects.scanwisp.ui.components.FullScreenLoader
@@ -102,6 +107,25 @@ fun DocumentDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* granted or not — OCR уже запущен */ }
+
+    val launchOcrWithPermission: (() -> Unit) -> Unit = remember {
+        { ocrAction: () -> Unit ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val ctx = context
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            ocrAction()
+        }
+    }
 
     var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
     var tempFileToClean: File? by remember { mutableStateOf(null) }
@@ -291,6 +315,7 @@ fun DocumentDetailScreen(
                                 onDeleteSelected = { viewModel.deleteSelectedPages() },
                                 onExportSelected = { viewModel.onShareRequest() },
                                 onSplitSelected = { viewModel.splitSelectedPages() },
+                                onOcrSelected = { launchOcrWithPermission { viewModel.recognizeSelectedPages() } },
                                 canSplit = canSplit
                             )
                         }
@@ -305,8 +330,10 @@ fun DocumentDetailScreen(
                                 onSortClick = { viewModel.toggleSortMode() },
                                 onTitleClick = { viewModel.onRenameRequest() },
                                 onShareClick = { viewModel.onShareAllPagesRequest() },
-                                onMoveClick = { viewModel.onMoveRequest() }
-                            )
+                                onMoveClick = { viewModel.onMoveRequest() },
+                                onOcrClick = {
+                                    launchOcrWithPermission { viewModel.recognizeAllPages() }
+                                })
                         }
                     }
                 }
@@ -364,6 +391,20 @@ fun DocumentDetailScreen(
                     }
 
                     val gridState = rememberLazyGridState()
+
+                    // Прокрутка к странице из поиска — только один раз при первом появлении данных
+                    var hasScrolledToInitialPage by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(pages) {
+                        val targetId = viewModel.initialPageId
+                        if (targetId != null && pages.isNotEmpty() && !hasScrolledToInitialPage) {
+                            val idx = pages.indexOfFirst { it.id == targetId }
+                            if (idx >= 0) {
+                                gridState.scrollToItem(idx)
+                                hasScrolledToInitialPage = true
+                            }
+                        }
+                    }
 
                     // -------------------- РЕЖИМ СОРТИРОВКИ: ЛОКАЛЬНЫЙ СПИСОК --------------------
                     var localPages by remember { mutableStateOf<List<PageEntity>>(emptyList()) }
@@ -424,7 +465,9 @@ fun DocumentDetailScreen(
                                             } else if (!isSortMode) {
                                                 navController.navigate(
                                                     Screen.PreviewPage.createRoute(page.id)
-                                                )
+                                                ) {
+                                                    launchSingleTop = true
+                                                }
                                             }
                                         },
                                         onLongClick = {
@@ -453,7 +496,19 @@ fun DocumentDetailScreen(
                                         expanded = expandedMenuPageId == page.id,
                                         onDismissRequest = { viewModel.onPageMenuDismissed() },
                                         onSetAsCoverClick = { viewModel.setPageAsCover(page.id) },
-                                        onShareClick = { viewModel.shareSinglePage(page.id) }
+                                        onShareClick = { viewModel.shareSinglePage(page.id) },
+                                        onRecognizeFastClick = {
+                                            viewModel.recognizePage(
+                                                page.id,
+                                                OcrMode.FAST
+                                            )
+                                        },
+                                        onRecognizeFullClick = {
+                                            viewModel.recognizePage(
+                                                page.id,
+                                                OcrMode.FULL
+                                            )
+                                        }
                                     )
                                 }
                             }

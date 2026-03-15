@@ -7,12 +7,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -20,13 +25,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TextSnippet
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +79,10 @@ fun PreviewScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val loadingState by viewModel.loadingState.collectAsStateWithLifecycle()
     val recognizedText by viewModel.recognizedText.collectAsStateWithLifecycle()
+    val canImprove by viewModel.canImprove.collectAsStateWithLifecycle()
+    val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
+    val editBuffer by viewModel.editBuffer.collectAsStateWithLifecycle()
+    val showOverwriteWarning by viewModel.showOverwriteWarning.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -235,19 +250,80 @@ fun PreviewScreen(
                             .fillMaxSize()
                             .padding(16.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = "Распознанный текст",
-                                style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-                            SelectionContainer { // Позволяет копировать текст
+                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+
+                            // Заголовок + кнопки действий
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = recognizedText!!,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.verticalScroll(rememberScrollState())
+                                    text = if (isEditMode) "Редактирование" else "Распознанный текст",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                if (!isEditMode) {
+                                    // Кнопка перехода в режим редактирования
+                                    IconButton(onClick = { viewModel.onEditTextClicked() }) {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "Редактировать"
+                                        )
+                                    }
+                                }
                             }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            if (isEditMode) {
+                                // --- Режим редактирования ---
+                                OutlinedTextField(
+                                    value = editBuffer,
+                                    onValueChange = { viewModel.onEditBufferChanged(it) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 200.dp),
+                                    textStyle = MaterialTheme.typography.bodyLarge
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(onClick = { viewModel.onCancelEditClicked() }) {
+                                        Text("Отмена")
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(onClick = { viewModel.onSaveEditClicked() }) {
+                                        Text("Сохранить")
+                                    }
+                                }
+                            } else {
+                                // --- Режим просмотра ---
+                                if (canImprove) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.onImproveRecognitionClicked() },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.AutoFixHigh, contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stringResource(R.string.preview_action_improve_ocr))
+                                    }
+                                }
+                                SelectionContainer {
+                                    Text(
+                                        text = recognizedText!!,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier.verticalScroll(rememberScrollState())
+                                    )
+                                }
+                            }
+
                             Spacer(Modifier.height(32.dp))
                         }
                     }
@@ -261,6 +337,20 @@ fun PreviewScreen(
         ErrorDialog(
             error = error,
             onDismiss = { errorToShowInDialog = null }
+        )
+    }
+
+    if (showOverwriteWarning) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onOverwriteDismissed() },
+            title = { Text("Перезаписать текст?") },
+            text = { Text("Вы редактировали текст вручную. OCR заменит ваши правки.") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onOverwriteConfirmed() }) { Text("Перезаписать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.onOverwriteDismissed() }) { Text("Отмена") }
+            }
         )
     }
 }

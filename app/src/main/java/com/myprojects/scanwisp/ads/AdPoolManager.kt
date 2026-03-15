@@ -10,6 +10,7 @@ import com.google.android.gms.ads.nativead.NativeAd
 import com.myprojects.scanwisp.consent.ConsentManager
 import com.myprojects.scanwisp.domain.repository.RemoteConfigRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,18 +43,15 @@ class AdPoolManager @Inject constructor(
 
     init {
         scope.launch {
-            // Ждем, пока consentManager не даст разрешение.
             consentManager.canRequestAds.filter { it }.first()
 
-            //  Инициализируем SDK прямо здесь, в фоновом потоке,
-            // как только получили согласие, но ДО первой загрузки рекламы.
             if (isMobileAdsInitialized.compareAndSet(false, true)) {
-                // Запускаем инициализацию в главном потоке, как того требует SDK,
-                // но сам вызов происходит с задержкой и не блокирует старт приложения.
-                launch(Dispatchers.Main) {
-                    MobileAds.initialize(context) {}
-                    Timber.d("Mobile Ads SDK initialized on-demand.")
+                val initDone = CompletableDeferred<Unit>()
+                withContext(Dispatchers.Main) {
+                    MobileAds.initialize(context) { initDone.complete(Unit) }
                 }
+                initDone.await()
+                Timber.d("Mobile Ads SDK initialized on-demand.")
             }
 
             Timber.d("Consent received. Initializing ad pool.")
@@ -82,7 +81,7 @@ class AdPoolManager @Inject constructor(
         }
 
         if (!isAdLoading.compareAndSet(false, true)) {
-            Timber.d( "Ad loading is already in progress.")
+            Timber.d("Ad loading is already in progress.")
             return
         }
 
@@ -94,12 +93,12 @@ class AdPoolManager @Inject constructor(
         }
 
         scope.launch {
-            Timber.d( "Attempting to load $adsToLoad new ad(s).")
+            Timber.d("Attempting to load $adsToLoad new ad(s).")
 
             val adLoader = AdLoader.Builder(context, AD_UNIT_ID)
                 .forNativeAd { nativeAd ->
                     adPool.offer(nativeAd)
-                    Timber.d( "Native ad loaded and added to pool. Pool size: ${adPool.size}")
+                    Timber.d("Native ad loaded and added to pool. Pool size: ${adPool.size}")
                 }
                 .withAdListener(object : AdListener() {
                     override fun onAdFailedToLoad(loadAdError: LoadAdError) {

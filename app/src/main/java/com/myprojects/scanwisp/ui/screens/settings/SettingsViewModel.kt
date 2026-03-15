@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.myprojects.scanwisp.domain.model.AppError
+import com.myprojects.scanwisp.domain.model.OcrLanguage
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.ThemePreference
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
@@ -33,22 +34,20 @@ class SettingsViewModel @Inject constructor(
     private val _uiEventFlow = MutableSharedFlow<UiEvent>()
     val uiEventFlow = _uiEventFlow.asSharedFlow()
 
-    // ИЗМЕНЕНИЕ: Один StateFlow для всего состояния экрана.
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsRepository.pdfExportProfile,
         settingsRepository.themePreference,
-        settingsRepository.fitToA4
-    ) { pdfProfile, theme, fitA4 ->
-        // combine сработает только тогда, когда каждый из потоков эмиттирует хотя бы одно значение.
-        // Мы упаковываем все полученные настройки в один объект.
-        val allSettings = AllSettings(
-            pdfExportProfile = pdfProfile,
-            themePreference = theme,
-            fitToA4 = fitA4
+        settingsRepository.fitToA4,
+        settingsRepository.defaultOcrLanguage
+    ) { pdfProfile, theme, fitA4, ocrLanguage ->
+        SettingsUiState.Success(
+            AllSettings(
+                pdfExportProfile = pdfProfile,
+                themePreference = theme,
+                fitToA4 = fitA4,
+                defaultOcrLanguage = ocrLanguage
+            )
         )
-
-        // И эмитируем состояние Success с этим объектом.
-        SettingsUiState.Success(allSettings)
     }
         .map { successState ->
             // Явно приводим тип потока к общему интерфейсу SettingsUiState
@@ -103,6 +102,17 @@ class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 Timber.e(e, "Failed to save A4 setting")
                 crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
+    fun onOcrLanguageSelected(language: OcrLanguage) {
+        viewModelScope.launch {
+            try {
+                settingsRepository.saveDefaultOcrLanguage(language)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save OCR language")
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }

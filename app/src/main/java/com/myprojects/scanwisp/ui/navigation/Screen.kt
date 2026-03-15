@@ -13,8 +13,10 @@ sealed class Screen(val route: String) {
         fun createRouteWithFolder(folderId: String) = "home_screen?folderId=$folderId"
     }
 
-    object DocumentDetail : Screen("document_detail_screen/{documentId}") {
+    object DocumentDetail : Screen("document_detail_screen/{documentId}?pageId={pageId}") {
         fun createRoute(documentId: String) = "document_detail_screen/$documentId"
+        fun createRouteWithPage(documentId: String, pageId: String) =
+            "document_detail_screen/$documentId?pageId=$pageId"
     }
 
     object PreviewPage : Screen("preview_page_screen/{pageId}") {
@@ -26,4 +28,6 @@ sealed class Screen(val route: String) {
     object Settings : Screen("settings_screen")
 
     object Trash : Screen("trash_screen")
+
+    object Search : Screen("search_screen")
 }

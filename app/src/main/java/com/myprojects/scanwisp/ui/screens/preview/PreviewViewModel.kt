@@ -11,9 +11,11 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.myprojects.scanwisp.core.storage.StorageService
 import com.myprojects.scanwisp.domain.model.AppError
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.StringProvider
 import com.myprojects.scanwisp.domain.use_case.RecognizePageUseCase
+import com.myprojects.scanwisp.domain.use_case.SaveEditedTextUseCase
 import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.state.LoadingState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -39,7 +42,8 @@ class PreviewViewModel @Inject constructor(
     private val analytics: FirebaseAnalytics,
     private val crashlytics: FirebaseCrashlytics,
     private val storageService: StorageService,
-    private val recognizePageUseCase: RecognizePageUseCase
+    private val recognizePageUseCase: RecognizePageUseCase,
+    private val saveEditedTextUseCase: SaveEditedTextUseCase
 ) : ViewModel() {
 
     private val pageId: String = checkNotNull(savedStateHandle["pageId"])
@@ -108,10 +112,6 @@ class PreviewViewModel @Inject constructor(
             val operationDir = storageService.appFilesDir()
 
             var reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            if (reservation == null) {
-                storageService.clearExportCache()
-                reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            }
 
             reservation?.use { _ ->
                 try {
@@ -135,28 +135,110 @@ class PreviewViewModel @Inject constructor(
     private val _recognizedText = MutableStateFlow<String?>(null)
     val recognizedText = _recognizedText.asStateFlow()
 
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode = _isEditMode.asStateFlow()
+
+    // Буфер редактирования — отдельно от _recognizedText,
+    // чтобы отмена правок не затирала отображаемый текст
+    private val _editBuffer = MutableStateFlow("")
+    val editBuffer = _editBuffer.asStateFlow()
+
+    private val _showOverwriteWarning = MutableStateFlow(false)
+    val showOverwriteWarning = _showOverwriteWarning.asStateFlow()
+
+    // Храним pending-mode для случая когда юзер подтвердил overwrite
+    private var pendingOcrMode: OcrMode? = null
+
+    private val _lastOcrMode = MutableStateFlow<OcrMode?>(null)
+
+    val canImprove: StateFlow<Boolean> = combine(_recognizedText, _lastOcrMode) { text, mode ->
+        text != null && mode == OcrMode.FAST
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     fun onRecognizeTextClicked() {
+        launchOcr(mode = OcrMode.FAST, forceRerun = false)
+    }
+
+    fun onImproveRecognitionClicked() {
+        launchOcr(mode = OcrMode.FULL, forceRerun = true)
+    }
+
+    // --- Методы редактирования ---
+
+    fun onEditTextClicked() {
+        _editBuffer.value = _recognizedText.value ?: ""
+        _isEditMode.value = true
+    }
+
+    fun onEditBufferChanged(text: String) {
+        _editBuffer.value = text
+    }
+
+    fun onSaveEditClicked() {
         viewModelScope.launch {
-            _loadingState.update { it.copy(isBusy = true, message = "Распознавание текста...") }
-            try {
-                val text = recognizePageUseCase(pageId)
-                if (text.isNotBlank()) {
-                    _recognizedText.value = text
-                    analytics.logEvent("ocr_success", null)
-                } else {
-                    _uiEventFlow.emit(UiEvent.ShowSnackbar("Текст не найден"))
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "OCR failed")
-                crashlytics.recordException(e)
-                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка распознавания")))
-            } finally {
-                _loadingState.update { it.copy(isBusy = false) }
+            val newText = _editBuffer.value
+            saveEditedTextUseCase(pageId, newText)
+            _recognizedText.value = newText
+            _isEditMode.value = false
+        }
+    }
+
+    fun onCancelEditClicked() {
+        _isEditMode.value = false
+        _editBuffer.value = ""
+    }
+
+    private fun launchOcr(mode: OcrMode, forceRerun: Boolean) {
+        viewModelScope.launch {
+            // Если текст был отредактирован вручную — предупреждаем перед перезаписью
+            val page = (uiState.value as? PreviewUiState.Success)?.page
+            if (forceRerun && page?.isTextUserEdited == true) {
+                pendingOcrMode = mode
+                _showOverwriteWarning.value = true
+                return@launch
             }
+            executeLaunchOcr(mode, forceRerun)
+        }
+    }
+
+    fun onOverwriteConfirmed() {
+        _showOverwriteWarning.value = false
+        val mode = pendingOcrMode ?: return
+        pendingOcrMode = null
+        viewModelScope.launch { executeLaunchOcr(mode, forceRerun = true) }
+    }
+
+    fun onOverwriteDismissed() {
+        _showOverwriteWarning.value = false
+        pendingOcrMode = null
+    }
+
+    private suspend fun executeLaunchOcr(mode: OcrMode, forceRerun: Boolean) {
+        val message = if (mode == OcrMode.FAST) "Распознавание текста..."
+        else "Улучшенное распознавание (Full)..."
+        _loadingState.update { it.copy(isBusy = true, message = message) }
+        try {
+            val text = recognizePageUseCase(pageId, mode = mode, forceRerun = forceRerun)
+            if (text.isNotBlank()) {
+                _recognizedText.value = text
+                _lastOcrMode.value = mode
+                analytics.logEvent("ocr_success", null)
+            } else {
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Текст не найден"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "OCR failed")
+            crashlytics.recordException(e)
+            _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка распознавания")))
+        } finally {
+            _loadingState.update { it.copy(isBusy = false) }
         }
     }
 
     fun dismissTextDialog() {
         _recognizedText.value = null
+        _lastOcrMode.value = null
+        _isEditMode.value = false
+        _editBuffer.value = ""
     }
 }

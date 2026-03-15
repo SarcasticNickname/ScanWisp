@@ -486,8 +486,9 @@ fun HomeScreenContent(
                         onHapticFeedback(HapticFeedbackType.TextHandleMove)
                         viewModel.onDocumentClick(documentId)
                     } else {
-                        navController.navigate(Screen.DocumentDetail.createRoute(documentId))
-                    }
+                        navController.navigate(Screen.DocumentDetail.createRoute(documentId)) {
+                            launchSingleTop = true
+                        }                    }
                 },
                 onDocumentLongClick = { documentId ->
                     onHapticFeedback(HapticFeedbackType.LongPress)
@@ -537,7 +538,9 @@ fun HomeScreenContent(
                                                 Screen.DocumentDetail.createRoute(
                                                     documentId
                                                 )
-                                            )
+                                            ) {
+                                                launchSingleTop = true
+                                            }
                                         }
                                     },
                                     onLongClick = {

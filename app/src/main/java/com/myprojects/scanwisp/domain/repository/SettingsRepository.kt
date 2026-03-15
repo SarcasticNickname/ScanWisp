@@ -1,5 +1,7 @@
 package com.myprojects.scanwisp.domain.repository
 
+import com.myprojects.scanwisp.domain.model.OcrLanguage
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
@@ -93,4 +95,9 @@ interface SettingsRepository {
      * Сохраняет флаг о том, что подсказка о сортировке была показана.
      */
     suspend fun setSortHintShown(shown: Boolean)
+
+    val defaultOcrMode: Flow<OcrMode>
+
+    val defaultOcrLanguage: Flow<OcrLanguage>
+    suspend fun saveDefaultOcrLanguage(language: OcrLanguage)
 }

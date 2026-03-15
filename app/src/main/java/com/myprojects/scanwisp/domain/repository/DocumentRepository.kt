@@ -2,6 +2,7 @@ package com.myprojects.scanwisp.domain.repository
 
 import android.net.Uri
 import com.myprojects.scanwisp.data.local.DocumentRow
+import com.myprojects.scanwisp.data.local.PageSearchResult
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
@@ -19,17 +20,20 @@ interface DocumentRepository {
         sortOrder: SortOrder
     ): Flow<List<DocumentRow>>
 
+    /**
+     * Полнотекстовый поиск по OCR-тексту страниц.
+     * Возвращает результаты из FTS5-таблицы pages_fts.
+     * Пустой запрос → пустой список.
+     */
+    fun searchByContent(query: String): Flow<List<PageSearchResult>>
+
 
     fun getDocumentById(id: String): Flow<DocumentWithPages?>
-    suspend fun createDocument(
-        title: String,
-        sourceUris: List<Uri>,
-        folderId: String?
-    )
+    suspend fun createDocument(title: String, sourceUris: List<Uri>, folderId: String?): String
 
     suspend fun renameDocument(documentId: String, newTitle: String)
     suspend fun deleteDocumentById(documentId: String)
-    suspend fun addPagesToDocument(documentId: String, sourceUris: List<Uri>)
+    suspend fun addPagesToDocument(documentId: String, sourceUris: List<Uri>): String
     suspend fun deletePages(pageIds: List<String>)
     suspend fun updatePageOrder(reorderedPages: List<PageEntity>)
     fun getPageById(pageId: String): Flow<PageEntity?>

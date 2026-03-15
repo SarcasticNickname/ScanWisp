@@ -39,6 +39,7 @@ import com.myprojects.scanwisp.ui.screens.home.HomeScreen
 import com.myprojects.scanwisp.ui.screens.onboarding.OnboardingScreen
 import com.myprojects.scanwisp.ui.screens.preview.PreviewScreen
 import com.myprojects.scanwisp.ui.screens.router.RouterScreen
+import com.myprojects.scanwisp.ui.screens.search.SearchScreen
 import com.myprojects.scanwisp.ui.screens.settings.SettingsScreen
 import com.myprojects.scanwisp.ui.screens.trash.TrashScreen
 import com.myprojects.scanwisp.ui.theme.ScanWispTheme
@@ -219,6 +220,14 @@ fun AppNavHost(
         }
         composable(
             route = Screen.DocumentDetail.route,
+            arguments = listOf(
+                navArgument("documentId") { type = NavType.StringType },
+                navArgument("pageId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            ),
             enterTransition = { slideInVertically(initialOffsetY = { it }) },
             popExitTransition = { slideOutVertically(targetOffsetY = { it }) }
         ) {
@@ -239,6 +248,13 @@ fun AppNavHost(
                 navController = navController,
                 widthSizeClass = windowSizeClass
             )
+        }
+        composable(
+            route = Screen.Search.route,
+            enterTransition = { slideInVertically(initialOffsetY = { it }) },
+            popExitTransition = { slideOutVertically(targetOffsetY = { it }) }
+        ) {
+            SearchScreen(navController = navController)
         }
     }
 }

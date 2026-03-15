@@ -6,25 +6,35 @@ import androidx.core.os.bundleOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.core.storage.StorageService
+import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.PageEntity
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ExportFormat
+import com.myprojects.scanwisp.domain.model.OcrMode
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import com.myprojects.scanwisp.domain.repository.StringProvider
+import com.myprojects.scanwisp.domain.use_case.RecognizePageUseCase
 import com.myprojects.scanwisp.domain.use_case.SplitPagesUseCase
 import com.myprojects.scanwisp.ui.delegate.ExportManagerDelegate
 import com.myprojects.scanwisp.ui.events.UiEvent
 import com.myprojects.scanwisp.ui.screens.home.ExportAction
 import com.myprojects.scanwisp.ui.state.LoadingState
+import com.myprojects.scanwisp.worker.OcrWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,9 +48,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -58,10 +66,16 @@ class DocumentDetailViewModel @Inject constructor(
     private val stringProvider: StringProvider,
     private val analytics: FirebaseAnalytics,
     private val crashlytics: FirebaseCrashlytics,
-    private val storageService: StorageService
+    private val storageService: StorageService,
+    private val recognizePageUseCase: RecognizePageUseCase,
+    private val workManager: WorkManager,
+    private val documentDao: DocumentDao
 ) : ViewModel() {
 
     private val documentId: String = checkNotNull(savedStateHandle["documentId"])
+
+    val initialPageId: String? = savedStateHandle["pageId"]
+
     private val selectedPageIdsKey = "detailSelectedPageIds"
 
     private val _pendingDeletionPageIds = MutableStateFlow<Set<String>>(emptySet())
@@ -121,7 +135,8 @@ class DocumentDetailViewModel @Inject constructor(
     private val _loadingState = MutableStateFlow(LoadingState())
     val loadingState = _loadingState.asStateFlow()
 
-    val shareDialogState: StateFlow<ExportManagerDelegate.ShareDialogState> = exportManager.shareDialogState
+    val shareDialogState: StateFlow<ExportManagerDelegate.ShareDialogState> =
+        exportManager.shareDialogState
 
     private val _isRenameDialogVisible = MutableStateFlow(false)
     val isRenameDialogVisible = _isRenameDialogVisible.asStateFlow()
@@ -136,9 +151,6 @@ class DocumentDetailViewModel @Inject constructor(
         crashlytics.setCustomKey("current_screen", "document_detail")
         crashlytics.setCustomKey("document_id", documentId)
 
-        selectedPageIds
-            .onEach { ids -> savedStateHandle[selectedPageIdsKey] = ids }
-            .launchIn(viewModelScope)
 
         viewModelScope.launch {
             repository.getAllFolders().collect { folders ->
@@ -192,9 +204,6 @@ class DocumentDetailViewModel @Inject constructor(
                 val newDocsCount = splitPagesUseCase(documentId, pageIds)
                 analytics.logEvent("pages_split", bundleOf("split_count" to newDocsCount.toLong()))
                 _uiEventFlow.emit(UiEvent.ShowSnackbar("$newDocsCount страниц(ы) выделены в новые документы"))
-                if (pageIds.size == originalDoc.pages.size) {
-                    _uiEventFlow.emit(UiEvent.NavigateBack)
-                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to split pages")
                 crashlytics.recordException(e)
@@ -366,10 +375,6 @@ class DocumentDetailViewModel @Inject constructor(
             val operationDir = storageService.appFilesDir()
 
             var reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            if (reservation == null) {
-                storageService.clearExportCache()
-                reservation = storageService.tryReserve(requiredSpace, dir = operationDir)
-            }
 
             reservation?.use { _ ->
                 try {
@@ -377,9 +382,7 @@ class DocumentDetailViewModel @Inject constructor(
                     if (uris.isNotEmpty()) {
                         repository.addPagesToDocument(documentId, uris)
                         analytics.logEvent(
-                            "pages_added", bundleOf(
-                                "added_count" to uris.size.toLong()
-                            )
+                            "pages_added", bundleOf("added_count" to uris.size.toLong())
                         )
                     }
                 } catch (e: Exception) {
@@ -412,11 +415,13 @@ class DocumentDetailViewModel @Inject constructor(
         deletePagesJob = viewModelScope.launch {
             try {
                 delay(5000)
+                val willBeEmpty = documentFlow.value?.pages
+                    ?.all { it.id in pageIds.toSet() } == true
                 analytics.logEvent("pages_deleted", bundleOf("count" to pageIds.size.toLong()))
                 repository.deletePages(pageIds)
                 _pendingDeletionPageIds.update { it - pageIds.toSet() }
                 pagesPendingDeletion.clear()
-                if (documentFlow.value?.pages?.none { it.id !in pageIds.toSet() } == true) {
+                if (willBeEmpty) {
                     _uiEventFlow.emit(UiEvent.NavigateBack)
                 }
             } catch (e: Exception) {
@@ -474,5 +479,93 @@ class DocumentDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             exportManager.cleanUpTempFile(tempFile)
         }
+    }
+
+    fun recognizePage(pageId: String, mode: OcrMode) {
+        viewModelScope.launch {
+            try {
+                // Сбрасываем статус → PENDING, чтобы воркер подхватил
+                documentDao.updatePageOcrStatus(pageId, OcrStatus.PENDING)
+
+                val doc = documentFlow.value ?: return@launch
+                val documentId = doc.document.id
+                val documentTitle = doc.document.title
+
+                enqueueOcr(documentId, documentTitle)
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Распознавание запущено"))
+                analytics.logEvent("ocr_from_detail", null)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to enqueue OCR")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка запуска распознавания")))
+            }
+        }
+    }
+
+    /** Распознать ВСЕ страницы документа */
+    fun recognizeAllPages() {
+        viewModelScope.launch {
+            try {
+                val doc = documentFlow.value ?: return@launch
+                val pages = doc.pages
+                if (pages.isEmpty()) return@launch
+
+                // Сбрасываем все страницы в PENDING
+                pages.forEach { page ->
+                    documentDao.updatePageOcrStatus(page.id, OcrStatus.PENDING)
+                }
+
+                enqueueOcr(doc.document.id, doc.document.title)
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Распознавание запущено (${pages.size} стр.)"))
+                analytics.logEvent("ocr_all_pages", null)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to enqueue OCR for all pages")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка запуска распознавания")))
+            }
+        }
+    }
+
+    /** Распознать только ВЫБРАННЫЕ страницы */
+    fun recognizeSelectedPages() {
+        viewModelScope.launch {
+            try {
+                val doc = documentFlow.value ?: return@launch
+                val selected = selectedPageIds.value
+                if (selected.isEmpty()) return@launch
+
+                // Сбрасываем только выбранные в PENDING
+                selected.forEach { pageId ->
+                    documentDao.updatePageOcrStatus(pageId, OcrStatus.PENDING)
+                }
+
+                enqueueOcr(doc.document.id, doc.document.title)
+                clearSelection()
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Распознавание запущено (${selected.size} стр.)"))
+                analytics.logEvent("ocr_selected_pages", null)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to enqueue OCR for selected pages")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.General("Ошибка запуска распознавания")))
+            }
+        }
+    }
+
+    private fun enqueueOcr(documentId: String, documentTitle: String) {
+        val inputData = workDataOf(
+            OcrWorker.KEY_DOCUMENT_ID to documentId,
+            OcrWorker.KEY_DOCUMENT_TITLE to documentTitle
+        )
+        val request = OneTimeWorkRequestBuilder<OcrWorker>()
+            .setInputData(inputData)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag("ocr_$documentId")
+            .build()
+
+        workManager.enqueueUniqueWork(
+            "ocr_$documentId",
+            ExistingWorkPolicy.APPEND_OR_REPLACE,  // APPEND — новые страницы в конец очереди
+            request
+        )
     }
 }

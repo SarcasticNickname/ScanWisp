@@ -19,9 +19,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.data.local.model.PageEntity
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import com.myprojects.scanwisp.ui.components.ShimmeringCard
 import com.myprojects.scanwisp.ui.theme.Dimens
 
@@ -157,6 +160,49 @@ fun PageThumbnailCard(
                     .align(Alignment.BottomStart)
                     .padding(8.dp)
             )
+            val effectiveStatus =
+                if (page.ocrStatus != OcrStatus.DONE && !page.extractedText.isNullOrBlank()) {
+                    OcrStatus.DONE
+                } else {
+                    page.ocrStatus
+                }
+            when (effectiveStatus) {
+                OcrStatus.IN_PROGRESS -> {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .size(20.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .padding(3.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.fillMaxSize(),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                OcrStatus.FAILED -> {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = "Ошибка распознавания",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .size(20.dp)
+                    )
+                }
+
+                OcrStatus.DONE -> { /* ничего не показываем */
+                }
+
+                OcrStatus.PENDING -> {/* ничего не показываем */
+                }
+            }
+
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,

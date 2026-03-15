@@ -4,10 +4,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.RestoreFromTrash
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.RestoreFromTrash
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +46,12 @@ fun ScanWispBottomAppBar(
             Screen.Home.createRoute(),
             Icons.Filled.Home,
             Icons.Outlined.Home
+        ),
+        BottomNavItem(
+            stringResource(R.string.bottom_nav_search),
+            Screen.Search.route,
+            Icons.Filled.Search,
+            Icons.Outlined.Search
         ),
         BottomNavItem(
             stringResource(R.string.bottom_nav_folders),

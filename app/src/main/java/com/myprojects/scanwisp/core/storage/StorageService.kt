@@ -16,10 +16,9 @@ import javax.inject.Singleton
 
 private const val MB = 1024L * 1024L
 
-/** Было 50MB — слишком агрессивно для реальных устройств с малым остатком. */
-private const val DEFAULT_HEADROOM = 10L * MB         // «запас прочности», мягче
+private const val DEFAULT_HEADROOM = 10L * MB   // «запас прочности», мягче
 private const val MIN_HEADROOM = 10L * MB
-val PER_PAGE_ESTIMATE = (3.5 * MB).toLong()           // ≈3.5 МБ на страницу (обработка+превью)
+val PER_PAGE_ESTIMATE = (3.5 * MB).toLong()     // ≈3.5 МБ на страницу (обработка+превью)
 
 /** Токен резерва (освобождается автоматически через use/close). */
 class SpaceReservation internal constructor(
@@ -95,9 +94,9 @@ class StorageServiceImpl @Inject constructor(
             return acquire(requiredBytes)
         }
 
-        // 2) Почистим экспортные кэши и thumbs, затем ещё раз с headroom
+        // 2) Почистим экспортные кэши, затем ещё раз с headroom
         clearExportCache()
-        clearThumbCache()
+        // НЕ вызываем clearThumbCache() — thumbs содержат активные миниатюры страниц
         val avail2 = getAvailableBytes(dir)
         if (avail2 >= requiredBytes + headroom) {
             return acquire(requiredBytes)

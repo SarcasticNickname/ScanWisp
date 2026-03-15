@@ -20,15 +20,13 @@ class ImageCompressionService @Inject constructor() {
 
 
     /**
-     * ИЗМЕНЕНИЕ: Метод теперь не принимает профиль. Его единственная задача -
-     * применить агрессивное сжатие (уменьшение, ч/б, низкое качество) для
-     * создания "маленького" файла.
+     * Применяет агрессивное сжатие для профиля SMALL:
+     * уменьшение до maxSidePx, конвертация в grayscale, низкое JPEG quality.
      */
     suspend fun processImageStream(inputStream: InputStream): ByteArray =
         withContext(Dispatchers.IO) {
-            val imageBytes = inputStream.readBytes() // 1. Чтение с диска - это IO операция.
+            val imageBytes = inputStream.readBytes()
 
-            // 2. Все вычисления с Bitmap переносим на вычислительный диспетчер.
             withContext(Dispatchers.Default) {
                 val optsBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeStream(ByteArrayInputStream(imageBytes), null, optsBounds)
@@ -38,9 +36,8 @@ class ImageCompressionService @Inject constructor() {
                     throw IOException("Failed to read image bounds")
                 }
 
-                // Агрессивные настройки для профиля "Малый размер"
                 val jpegQuality = 75
-                val maxSidePx = 1600 // Уменьшаем разрешение еще сильнее
+                val maxSidePx = 1600
                 val toGray = true
 
                 val scale = if (srcW >= srcH) {
@@ -58,9 +55,21 @@ class ImageCompressionService @Inject constructor() {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                     inSampleSize = inSample
                 }
-                val decoded =
+                var decoded =
                     BitmapFactory.decodeStream(ByteArrayInputStream(imageBytes), null, optsDecode)
                         ?: throw IOException("Failed to decode bitmap")
+
+                // inSampleSize даёт только кратные 2 уменьшения (1, 2, 4, 8...).
+                // Если после decode изображение всё ещё больше целевого — делаем точный resize.
+                val currentLongSide = maxOf(decoded.width, decoded.height)
+                if (currentLongSide > maxSidePx) {
+                    val resizeScale = maxSidePx.toFloat() / currentLongSide
+                    val newW = (decoded.width * resizeScale).toInt().coerceAtLeast(1)
+                    val newH = (decoded.height * resizeScale).toInt().coerceAtLeast(1)
+                    val scaled = Bitmap.createScaledBitmap(decoded, newW, newH, true)
+                    if (scaled !== decoded) decoded.recycle()
+                    decoded = scaled
+                }
 
                 val bitmapToWrite = if (toGray) {
                     val gray =
@@ -79,7 +88,7 @@ class ImageCompressionService @Inject constructor() {
                 val out = ByteArrayOutputStream()
                 bitmapToWrite.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
                 bitmapToWrite.recycle()
-                out.toByteArray() // Возвращаем результат из блока Dispatchers.Default
+                out.toByteArray()
             }
         }
 

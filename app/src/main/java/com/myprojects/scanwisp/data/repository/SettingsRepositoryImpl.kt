@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.myprojects.scanwisp.domain.model.OcrLanguage
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
@@ -36,8 +38,10 @@ class SettingsRepositoryImpl @Inject constructor(
         val VIEW_MODE = stringPreferencesKey("view_mode")
         val FIT_TO_A4 = booleanPreferencesKey("fit_to_a4")
 
-        // Вот недостающая строка:
+        val DEFAULT_OCR_MODE = stringPreferencesKey("default_ocr_mode")
         val SORT_HINT_SHOWN = booleanPreferencesKey("sort_hint_shown")
+
+        val DEFAULT_OCR_LANGUAGE = stringPreferencesKey("default_ocr_language")
     }
 
     override val pdfExportProfile: Flow<PdfExportProfile> = context.dataStore.data
@@ -152,6 +156,24 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setSortHintShown(shown: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.SORT_HINT_SHOWN] = shown
+        }
+    }
+
+    override val defaultOcrMode: Flow<OcrMode> = context.dataStore.data
+        .map { prefs ->
+        val name = prefs[PreferencesKeys.DEFAULT_OCR_MODE] ?: OcrMode.FAST.name
+        runCatching { OcrMode.valueOf(name) }.getOrDefault(OcrMode.FAST)
+    }
+
+    override val defaultOcrLanguage: Flow<OcrLanguage> = context.dataStore.data
+        .map { prefs ->
+            val name = prefs[PreferencesKeys.DEFAULT_OCR_LANGUAGE] ?: OcrLanguage.RUSSIAN_ENGLISH.name
+            runCatching { OcrLanguage.valueOf(name) }.getOrDefault(OcrLanguage.RUSSIAN_ENGLISH)
+        }
+
+    override suspend fun saveDefaultOcrLanguage(language: OcrLanguage) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.DEFAULT_OCR_LANGUAGE] = language.name
         }
     }
 }

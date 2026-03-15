@@ -43,7 +43,7 @@ class GarbageCollectorWorker @AssistedInject constructor(
             coroutineScope {
                 val fullDocumentsDeferred = documentsToDelete.map { docEntity ->
                     async {
-                        documentDao.getDocumentWithPagesById(docEntity.id).first()
+                        documentDao.getDocumentWithPagesByIdAny(docEntity.id).first()
                     }
                 }
 
@@ -58,6 +58,10 @@ class GarbageCollectorWorker @AssistedInject constructor(
             }
 
             val idsToDelete = documentsToDelete.map { it.id }
+            // FTS sync перед удалением из БД
+            idsToDelete.forEach { docId ->
+                documentDao.deleteFtsEntriesForDocument(docId)
+            }
             documentDao.deleteDocumentsByIds(idsToDelete)
 
             Timber.d(
