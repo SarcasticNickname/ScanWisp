@@ -65,6 +65,30 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!--
+            Отключаем автоинициализацию WorkManager,
+            чтобы использовать HiltWorkerFactory из ScanWispApp.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!--
+            Объявляем foreground-сервис WorkManager с типом dataSync,
+            чтобы OcrWorker мог работать как foreground service.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
     </application>
 
 </manifest>

@@ -1,6 +1,7 @@
 package com.myprojects.scanwisp.worker
 
 import android.content.Context
+import android.content.pm.ServiceInfo
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -29,13 +30,15 @@ class OcrWorker @AssistedInject constructor(
     companion object {
         const val KEY_DOCUMENT_ID    = "document_id"
         const val KEY_DOCUMENT_TITLE = "document_title"
+        const val KEY_OCR_MODE       = "ocr_mode"
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val title = inputData.getString(KEY_DOCUMENT_TITLE) ?: ""
         return ForegroundInfo(
             OCR_NOTIFICATION_ID,
-            OcrNotificationHelper.buildProgressNotification(context, title, 0, 1)
+            OcrNotificationHelper.buildProgressNotification(context, title, 0, 1),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
     }
 
@@ -48,7 +51,9 @@ class OcrWorker @AssistedInject constructor(
 
         val totalPages = pages.size
 
-        val ocrMode = runCatching {
+        val ocrMode = inputData.getString(KEY_OCR_MODE)?.let { name ->
+            runCatching { OcrMode.valueOf(name) }.getOrNull()
+        } ?: runCatching {
             settingsRepository.defaultOcrMode.first()
         }.getOrDefault(OcrMode.FAST)
 
@@ -63,7 +68,8 @@ class OcrWorker @AssistedInject constructor(
                     OCR_NOTIFICATION_ID,
                     OcrNotificationHelper.buildProgressNotification(
                         context, documentTitle, currentPage, totalPages
-                    )
+                    ),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 )
             )
 

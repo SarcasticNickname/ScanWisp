@@ -266,9 +266,21 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override suspend fun updatePageOrder(reorderedPages: List<PageEntity>) {
         val updatedEntities = reorderedPages.mapIndexed { index, page ->
-            page.copy(position = index.toLong())
+            page.copy(position = index.toLong(), pageNumber = index + 1)
         }
         dao.updatePages(updatedEntities)
+
+        // Обновляем page_number в FTS для страниц с текстом
+        updatedEntities.forEach { page ->
+            if (!page.extractedText.isNullOrBlank()) {
+                dao.upsertFtsPageEntry(
+                    pageId = page.id,
+                    documentOwnerId = page.documentOwnerId,
+                    pageNumber = page.pageNumber,
+                    text = page.extractedText
+                )
+            }
+        }
     }
 
     override fun getPageById(pageId: String): Flow<PageEntity?> {
@@ -438,6 +450,27 @@ class DocumentRepositoryImpl @Inject constructor(
                     pageNumber = updatedPage.pageNumber,
                     text = updatedPage.extractedText
                 )
+            }
+        }
+
+        // Перенумеровываем оставшиеся страницы исходного документа
+        if (remainingPageCount > 0) {
+            val remainingPages = dao.getAllPagesForDocument(originalDocumentId)
+                .sortedBy { it.position }
+            val renumbered = remainingPages.mapIndexed { index, page ->
+                page.copy(position = index.toLong(), pageNumber = index + 1)
+            }
+            dao.updatePages(renumbered)
+
+            renumbered.forEach { page ->
+                if (!page.extractedText.isNullOrBlank()) {
+                    dao.upsertFtsPageEntry(
+                        pageId = page.id,
+                        documentOwnerId = page.documentOwnerId,
+                        pageNumber = page.pageNumber,
+                        text = page.extractedText
+                    )
+                }
             }
         }
     }

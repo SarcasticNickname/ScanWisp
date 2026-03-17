@@ -161,8 +161,14 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val defaultOcrMode: Flow<OcrMode> = context.dataStore.data
         .map { prefs ->
-        val name = prefs[PreferencesKeys.DEFAULT_OCR_MODE] ?: OcrMode.FAST.name
-        runCatching { OcrMode.valueOf(name) }.getOrDefault(OcrMode.FAST)
+            val name = prefs[PreferencesKeys.DEFAULT_OCR_MODE] ?: OcrMode.FAST.name
+            runCatching { OcrMode.valueOf(name) }.getOrDefault(OcrMode.FAST)
+        }
+
+    override suspend fun saveDefaultOcrMode(mode: OcrMode) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.DEFAULT_OCR_MODE] = mode.name
+        }
     }
 
     override val defaultOcrLanguage: Flow<OcrLanguage> = context.dataStore.data

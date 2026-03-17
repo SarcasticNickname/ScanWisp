@@ -4,6 +4,7 @@ import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.ocr.OcrService
 import com.myprojects.scanwisp.domain.model.OcrLanguage
 import com.myprojects.scanwisp.domain.model.OcrMode
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import com.myprojects.scanwisp.domain.model.WordBox
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.first
@@ -42,7 +43,8 @@ class RecognizePageUseCase @Inject constructor(
                     extractedText = result.plainText,
                     wordBoxesJson = if (result.wordBoxes.isNotEmpty())
                         WordBox.toJson(result.wordBoxes) else null,
-                    isTextUserEdited = false
+                    isTextUserEdited = false,
+                    ocrStatus = OcrStatus.DONE
                 )
             )
             documentDao.upsertFtsPageEntry(

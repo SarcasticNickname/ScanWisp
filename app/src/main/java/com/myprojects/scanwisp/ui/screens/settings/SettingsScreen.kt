@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material.icons.outlined.BrightnessMedium
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +52,7 @@ import androidx.navigation.NavController
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.OcrLanguage
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.ThemePreference
 import com.myprojects.scanwisp.ui.components.ErrorDialog
@@ -70,6 +72,7 @@ fun SettingsScreen(
     var showThemeDialog by remember { mutableStateOf(false) }
     var showPdfProfileDialog by remember { mutableStateOf(false) }
     var showOcrLanguageDialog by remember { mutableStateOf(false) }
+    var showOcrModeDialog by remember { mutableStateOf(false) }
 
     var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
 
@@ -151,6 +154,12 @@ fun SettingsScreen(
                         subtitle = settings.defaultOcrLanguage.toReadableString(),
                         onClick = { showOcrLanguageDialog = true }
                     )
+                    SettingsItem(
+                        icon = Icons.Outlined.Speed,
+                        title = stringResource(R.string.settings_item_ocr_mode),
+                        subtitle = settings.defaultOcrMode.toReadableString(),
+                        onClick = { showOcrModeDialog = true }
+                    )
 
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
@@ -203,6 +212,21 @@ fun SettingsScreen(
                         },
                         onDismissRequest = { showOcrLanguageDialog = false },
                         optionToReadableString = { it.toReadableString() }
+                    )
+                }
+
+                // Диалог режима OCR
+                if (showOcrModeDialog) {
+                    SettingsRadioDialog(
+                        title = stringResource(R.string.settings_dialog_title_ocr_mode),
+                        options = OcrMode.entries.toList(),
+                        selectedOption = settings.defaultOcrMode,
+                        onOptionSelected = {
+                            viewModel.onOcrModeSelected(it); showOcrModeDialog = false
+                        },
+                        onDismissRequest = { showOcrModeDialog = false },
+                        optionToReadableString = { it.toReadableString() },
+                        optionToDescription = { it.getDescription() }
                     )
                 }
             }
@@ -405,4 +429,16 @@ private fun OcrLanguage.toReadableString(): String = when (this) {
     OcrLanguage.RUSSIAN -> stringResource(R.string.ocr_language_russian)
     OcrLanguage.ENGLISH -> stringResource(R.string.ocr_language_english)
     OcrLanguage.RUSSIAN_ENGLISH -> stringResource(R.string.ocr_language_both)
+}
+
+@Composable
+private fun OcrMode.toReadableString(): String = when (this) {
+    OcrMode.FAST -> stringResource(R.string.settings_ocr_mode_fast)
+    OcrMode.FULL -> stringResource(R.string.settings_ocr_mode_full)
+}
+
+@Composable
+private fun OcrMode.getDescription(): String = when (this) {
+    OcrMode.FAST -> stringResource(R.string.settings_ocr_mode_fast_desc)
+    OcrMode.FULL -> stringResource(R.string.settings_ocr_mode_full_desc)
 }

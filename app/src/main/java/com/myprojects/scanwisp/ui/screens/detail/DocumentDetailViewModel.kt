@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -491,7 +492,7 @@ class DocumentDetailViewModel @Inject constructor(
                 val documentId = doc.document.id
                 val documentTitle = doc.document.title
 
-                enqueueOcr(documentId, documentTitle)
+                enqueueOcr(documentId, documentTitle, mode)
                 _uiEventFlow.emit(UiEvent.ShowSnackbar("Распознавание запущено"))
                 analytics.logEvent("ocr_from_detail", null)
             } catch (e: Exception) {
@@ -551,10 +552,11 @@ class DocumentDetailViewModel @Inject constructor(
         }
     }
 
-    private fun enqueueOcr(documentId: String, documentTitle: String) {
+    private fun enqueueOcr(documentId: String, documentTitle: String, ocrMode: OcrMode? = null) {
         val inputData = workDataOf(
             OcrWorker.KEY_DOCUMENT_ID to documentId,
-            OcrWorker.KEY_DOCUMENT_TITLE to documentTitle
+            OcrWorker.KEY_DOCUMENT_TITLE to documentTitle,
+            OcrWorker.KEY_OCR_MODE to ocrMode?.name
         )
         val request = OneTimeWorkRequestBuilder<OcrWorker>()
             .setInputData(inputData)
@@ -562,10 +564,28 @@ class DocumentDetailViewModel @Inject constructor(
             .addTag("ocr_$documentId")
             .build()
 
+        val uniqueWorkName = "ocr_$documentId"
+
         workManager.enqueueUniqueWork(
-            "ocr_$documentId",
-            ExistingWorkPolicy.APPEND_OR_REPLACE,  // APPEND — новые страницы в конец очереди
+            uniqueWorkName,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
             request
         )
+
+        // Наблюдаем за завершением, чтобы показать снэкбар
+        viewModelScope.launch {
+            val workInfos = workManager.getWorkInfosForUniqueWorkFlow(uniqueWorkName)
+                .first { infos ->
+                    infos.isNotEmpty() && infos.all { it.state.isFinished }
+                }
+
+            val allSucceeded = workInfos.all { it.state == WorkInfo.State.SUCCEEDED }
+            val message = if (allSucceeded) {
+                stringProvider.getString(R.string.snackbar_ocr_finished)
+            } else {
+                "Распознавание завершено с ошибками"
+            }
+            _uiEventFlow.emit(UiEvent.ShowSnackbar(message))
+        }
     }
 }

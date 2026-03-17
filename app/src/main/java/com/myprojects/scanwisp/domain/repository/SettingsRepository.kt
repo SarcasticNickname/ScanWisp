@@ -97,6 +97,7 @@ interface SettingsRepository {
     suspend fun setSortHintShown(shown: Boolean)
 
     val defaultOcrMode: Flow<OcrMode>
+    suspend fun saveDefaultOcrMode(mode: OcrMode)
 
     val defaultOcrLanguage: Flow<OcrLanguage>
     suspend fun saveDefaultOcrLanguage(language: OcrLanguage)

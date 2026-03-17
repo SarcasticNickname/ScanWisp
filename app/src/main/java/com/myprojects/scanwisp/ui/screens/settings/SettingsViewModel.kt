@@ -7,6 +7,7 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.OcrLanguage
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.ThemePreference
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
@@ -38,14 +39,16 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.pdfExportProfile,
         settingsRepository.themePreference,
         settingsRepository.fitToA4,
-        settingsRepository.defaultOcrLanguage
-    ) { pdfProfile, theme, fitA4, ocrLanguage ->
+        settingsRepository.defaultOcrLanguage,
+        settingsRepository.defaultOcrMode
+    ) { pdfProfile, theme, fitA4, ocrLanguage, ocrMode ->
         SettingsUiState.Success(
             AllSettings(
                 pdfExportProfile = pdfProfile,
                 themePreference = theme,
                 fitToA4 = fitA4,
-                defaultOcrLanguage = ocrLanguage
+                defaultOcrLanguage = ocrLanguage,
+                defaultOcrMode = ocrMode
             )
         )
     }
@@ -113,6 +116,18 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.saveDefaultOcrLanguage(language)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to save OCR language")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
+    fun onOcrModeSelected(mode: OcrMode) {
+        viewModelScope.launch {
+            try {
+                analytics.logEvent("ocr_mode_changed", bundleOf("new_mode" to mode.name))
+                settingsRepository.saveDefaultOcrMode(mode)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save OCR mode")
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }

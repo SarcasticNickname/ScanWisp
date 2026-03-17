@@ -3,6 +3,7 @@ package com.myprojects.scanwisp.ui.screens.settings
 import androidx.compose.runtime.Immutable
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.OcrLanguage
+import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.ThemePreference
 
@@ -14,7 +15,8 @@ data class AllSettings(
     val pdfExportProfile: PdfExportProfile,
     val themePreference: ThemePreference,
     val fitToA4: Boolean,
-    val defaultOcrLanguage: OcrLanguage
+    val defaultOcrLanguage: OcrLanguage,
+    val defaultOcrMode: OcrMode
 )
 
 /**

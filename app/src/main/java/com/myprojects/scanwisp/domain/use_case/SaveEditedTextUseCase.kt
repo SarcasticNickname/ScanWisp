@@ -1,6 +1,7 @@
 package com.myprojects.scanwisp.domain.use_case
 
 import com.myprojects.scanwisp.data.local.DocumentDao
+import com.myprojects.scanwisp.domain.model.OcrStatus
 import javax.inject.Inject
 
 class SaveEditedTextUseCase @Inject constructor(
@@ -11,7 +12,8 @@ class SaveEditedTextUseCase @Inject constructor(
         documentDao.updatePage(
             page.copy(
                 extractedText = newText,
-                isTextUserEdited = true
+                isTextUserEdited = true,
+                ocrStatus = OcrStatus.DONE
             )
         )
         if (newText.isNotBlank()) {

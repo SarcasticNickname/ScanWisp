@@ -15,7 +15,7 @@ object OcrNotificationHelper {
         val channel = NotificationChannel(
             OCR_CHANNEL_ID,
             context.getString(R.string.ocr_notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW  // LOW = без звука, без всплывания
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description = context.getString(R.string.ocr_notification_channel_desc)
         }

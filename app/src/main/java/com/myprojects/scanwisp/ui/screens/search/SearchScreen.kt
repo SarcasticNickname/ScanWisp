@@ -144,8 +144,8 @@ fun SearchScreen(
                         style    = MaterialTheme.typography.bodyMedium,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp)
+                            .align(Alignment.TopStart)
+                            .padding(horizontal = 16.dp, vertical = 24.dp)
                     )
                 }
 

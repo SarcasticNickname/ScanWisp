@@ -257,9 +257,18 @@
     <string name="ocr_language_english">English</string>
     <string name="ocr_language_both">Русский + English</string>
 
+    <string name="settings_item_ocr_mode">Режим распознавания</string>
+    <string name="settings_dialog_title_ocr_mode">Режим распознавания</string>
+    <string name="settings_ocr_mode_fast">Быстрый</string>
+    <string name="settings_ocr_mode_fast_desc">Меньшая точность, быстрее работает</string>
+    <string name="settings_ocr_mode_full">Точный</string>
+    <string name="settings_ocr_mode_full_desc">Выше точность, дольше обработка</string>
+
     <string name="detail_top_bar_cd_ocr">Распознать текст</string>
     <string name="detail_selection_bar_cd_ocr">Распознать выбранные</string>
 
-
+    <!-- OCR permission / completion snackbars -->
+    <string name="snackbar_notification_permission_denied">Без разрешения на уведомления прогресс распознавания не будет виден</string>
+    <string name="snackbar_ocr_finished">Распознавание завершено</string>
 
 </resources>

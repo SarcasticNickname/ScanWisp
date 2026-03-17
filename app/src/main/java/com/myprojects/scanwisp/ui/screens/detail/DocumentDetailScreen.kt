@@ -109,18 +109,32 @@ fun DocumentDetailScreen(
     val haptics = LocalHapticFeedback.current
 
 
+    var pendingOcrAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* granted or not — OCR уже запущен */ }
+    ) { isGranted ->
+        pendingOcrAction?.invoke()
+        pendingOcrAction = null
+        if (!isGranted) {
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    context.getString(R.string.snackbar_notification_permission_denied)
+                )
+            }
+        }
+    }
 
-    val launchOcrWithPermission: (() -> Unit) -> Unit = remember {
+    val launchOcrWithPermission: (() -> Unit) -> Unit = remember(notificationPermissionLauncher) {
         { ocrAction: () -> Unit ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val ctx = context
                 if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
                     != PackageManager.PERMISSION_GRANTED
                 ) {
+                    pendingOcrAction = ocrAction
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    return@remember
                 }
             }
             ocrAction()
@@ -498,16 +512,20 @@ fun DocumentDetailScreen(
                                         onSetAsCoverClick = { viewModel.setPageAsCover(page.id) },
                                         onShareClick = { viewModel.shareSinglePage(page.id) },
                                         onRecognizeFastClick = {
-                                            viewModel.recognizePage(
-                                                page.id,
-                                                OcrMode.FAST
-                                            )
+                                            launchOcrWithPermission {
+                                                viewModel.recognizePage(
+                                                    page.id,
+                                                    OcrMode.FAST
+                                                )
+                                            }
                                         },
                                         onRecognizeFullClick = {
-                                            viewModel.recognizePage(
-                                                page.id,
-                                                OcrMode.FULL
-                                            )
+                                            launchOcrWithPermission {
+                                                viewModel.recognizePage(
+                                                    page.id,
+                                                    OcrMode.FULL
+                                                )
+                                            }
                                         }
                                     )
                                 }
