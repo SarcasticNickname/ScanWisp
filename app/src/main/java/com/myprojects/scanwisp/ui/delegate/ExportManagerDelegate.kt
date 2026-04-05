@@ -50,7 +50,8 @@ class ExportManagerDelegate @Inject constructor(
         val isVisible: Boolean = false,
         val pageCount: Int = 0,
         val defaultName: String = "",
-        val action: ExportAction = ExportAction.SHARE
+        val action: ExportAction = ExportAction.SHARE,
+        val estimatedBytes: Long = 0L
     )
 
     private val _shareDialogState = MutableStateFlow(ShareDialogState())
@@ -105,12 +106,14 @@ class ExportManagerDelegate @Inject constructor(
             isVisible = true,
             pageCount = pageIdsToExport.size,
             defaultName = defaultName,
-            action = action
+            action = action,
+            estimatedBytes = documentRepository.getPagesByIds(pageIdsToExport)
+                .sumOf { storageService.sizeOf(it.processedImagePath) }
         )
     }
 
     /** Открытие диалога по конкретным страницам. */
-    fun requestExportForPages(pageIds: List<String>, defaultName: String, action: ExportAction) {
+    suspend fun requestExportForPages(pageIds: List<String>, defaultName: String, action: ExportAction) {
         if (pageIds.isEmpty()) {
             Timber.w("requestExportForPages called with empty pageIds.")
             return
@@ -122,12 +125,19 @@ class ExportManagerDelegate @Inject constructor(
             isVisible = true,
             pageCount = pageIds.size,
             defaultName = defaultName,
-            action = action
+            action = action,
+            estimatedBytes = documentRepository.getPagesByIds(pageIds)
+                .sumOf { storageService.sizeOf(it.processedImagePath) }
         )
     }
 
     /** Подтверждение экспорта из диалога. */
-    suspend fun onConfirmExport(format: ExportFormat, filename: String): UiEvent {
+    suspend fun onConfirmExport(
+        format: ExportFormat,
+        filename: String,
+        pdfProfile: PdfExportProfile? = null,
+        fitToA4: Boolean? = null
+    ): UiEvent {
         // --- ИЗМЕНЕНИЕ 1: СОЗДАЕМ НЕИЗМЕНЯЕМУЮ КОПИЮ ---
         // Этот `snapshot` не изменится, даже если `pageIdsToExport` будет очищен где-то еще.
         val pagesToExportSnapshot = pageIdsToExport.toList()
@@ -148,7 +158,7 @@ class ExportManagerDelegate @Inject constructor(
             // 1) Оценка размера с учётом профиля PDF из настроек
             val pages = documentRepository.getPagesByIds(pagesToExportSnapshot)
             val sumProcessedBytes = pages.sumOf { storageService.sizeOf(it.processedImagePath) }
-            val profile = settingsRepository.pdfExportProfile.first()
+            val profile = pdfProfile ?: settingsRepository.pdfExportProfile.first()
             val estimatedExportSize = when (format) {
                 ExportFormat.JPEG -> sumProcessedBytes
                 ExportFormat.ZIP -> (sumProcessedBytes * 1.05).toLong()
@@ -166,7 +176,11 @@ class ExportManagerDelegate @Inject constructor(
             // Локальная suspend-функция экспорта
             suspend fun doExport(): UiEvent {
                 // --- ИЗМЕНЕНИЕ 3: ИСПОЛЬЗУЕМ КОПИЮ ---
-                val exportResult = exportDocumentUseCase(pagesToExportSnapshot, filename, format)
+                val exportResult = exportDocumentUseCase(
+                    pagesToExportSnapshot, filename, format,
+                    pdfProfile = pdfProfile,
+                    fitToA4Override = fitToA4
+                )
                 if (exportResult != null) {
                     val mimeType = when (format) {
                         ExportFormat.PDF -> "application/pdf"

@@ -32,7 +32,7 @@ class TrashViewModel @Inject constructor(
     private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
 
     val uiState: StateFlow<TrashUiState> = combine(
-        repository.getDeletedDocumentRows(),
+        repository.getDeletedDocumentsWithDate(),
         _selectedIds
     ) { documents, selected ->
         TrashUiState.Success(documents, selected)

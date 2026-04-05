@@ -55,7 +55,12 @@ import com.myprojects.scanwisp.ui.theme.Dimens
 
 /**
  * Карточка-превью для одной страницы документа.
- * Отображает изображение, номер, состояния выбора и сортировки.
+ *
+ * Раскладка углов (без конфликтов):
+ *   TopStart  — номер страницы (всегда)  /  чекбокс выбора (в selection mode)
+ *   TopEnd    — кнопка MoreVert
+ *   BottomEnd — OCR-статус (иконка или badge)
+ *   BottomCenter — DragHandle (в режиме сортировки)
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -87,9 +92,9 @@ fun PageThumbnailCard(
         label = "page_border_width_animation"
     )
 
-    val stateDescSelected = stringResource(R.string.state_selected)
+    val stateDescSelected   = stringResource(R.string.state_selected)
     val stateDescNotSelected = stringResource(R.string.state_not_selected)
-    val stateDescDraggable = stringResource(R.string.detail_page_card_state_draggable)
+    val stateDescDraggable  = stringResource(R.string.detail_page_card_state_draggable)
     val cdPage = stringResource(R.string.detail_page_card_cd, pageIndex + 1)
 
     Card(
@@ -98,7 +103,6 @@ fun PageThumbnailCard(
             .semantics {
                 contentDescription = cdPage
                 role = Role.Button
-
                 val selectionState = if (isSelected) stateDescSelected else stateDescNotSelected
                 val dragState = if (showDragHandle) stateDescDraggable else ""
                 stateDescription = selectionState + dragState
@@ -114,15 +118,14 @@ fun PageThumbnailCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            SubcomposeAsyncImage(
 
+            // ── Изображение ──────────────────────────────────────────────────
+            SubcomposeAsyncImage(
                 model = page.thumbnailPath.ifBlank { page.processedImagePath },
                 contentDescription = stringResource(id = R.string.cd_page_preview_thumbnail),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-                loading = {
-                    ShimmeringCard(cornerRadius = 12.dp)
-                },
+                loading = { ShimmeringCard(cornerRadius = 12.dp) },
                 error = {
                     Image(
                         painter = painterResource(id = R.drawable.card_placeholder),
@@ -131,16 +134,52 @@ fun PageThumbnailCard(
                 }
             )
 
+            // ── Градиент снизу (для читаемости текста) ────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         brush = Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
-                            startY = 130f
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)),
+                            startY = 120f
                         )
                     )
             )
+
+            // ── TopStart: номер страницы или чекбокс ─────────────────────────
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = stringResource(R.string.state_selected),
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .size(22.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .padding(3.dp)
+                )
+            } else {
+                // Номер страницы — маленький pill с полупрозрачным фоном
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.45f)
+                ) {
+                    Text(
+                        text = "${pageIndex + 1}",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // ── TopEnd: MoreVert ──────────────────────────────────────────────
             IconButton(
                 onClick = onMoreClick,
                 modifier = Modifier.align(Alignment.TopEnd)
@@ -151,30 +190,20 @@ fun PageThumbnailCard(
                     tint = Color.White
                 )
             }
-            Text(
-                text = "${pageIndex + 1}",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                ),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-            )
-            val effectiveStatus =
-                if (page.ocrStatus != OcrStatus.DONE && !page.extractedText.isNullOrBlank()) {
-                    OcrStatus.DONE
-                } else {
-                    page.ocrStatus
-                }
+
+            // ── BottomEnd: OCR-статус ─────────────────────────────────────────
+            val effectiveStatus = if (page.ocrStatus != OcrStatus.DONE &&
+                !page.extractedText.isNullOrBlank()
+            ) OcrStatus.DONE else page.ocrStatus
+
             when (effectiveStatus) {
                 OcrStatus.IN_PROGRESS -> {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .size(20.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .padding(7.dp)
+                            .size(18.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape)
                             .padding(3.dp)
                     ) {
                         CircularProgressIndicator(
@@ -192,62 +221,48 @@ fun PageThumbnailCard(
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .size(20.dp)
+                            .padding(7.dp)
+                            .size(18.dp)
                     )
                 }
 
                 OcrStatus.DONE -> {
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
+                        imageVector = Icons.Filled.CheckCircle,
                         contentDescription = "Распознано",
                         tint = Color(0xFF4CAF50),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                            .size(20.dp)
+                            .padding(7.dp)
+                            .size(18.dp)
                     )
                 }
 
                 OcrStatus.PENDING -> {
-                    Surface(
+                    // «Не распознано» — только маленькая точка, без текста чтобы не занимать место
+                    Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp),
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.ocr_status_not_recognized),
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
+                            .padding(9.dp)
+                            .size(8.dp)
+                            .background(
+                                MaterialTheme.colorScheme.tertiaryContainer,
+                                CircleShape
+                            )
+                    )
                 }
             }
 
-            if (isSelected) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = stringResource(R.string.state_selected),
-                    tint = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .size(24.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                        .padding(4.dp)
-                )
-            }
+            // ── BottomCenter: DragHandle (режим сортировки) ───────────────────
             if (showDragHandle) {
                 Icon(
                     imageVector = Icons.Default.DragHandle,
                     contentDescription = stringResource(R.string.detail_page_card_state_draggable),
-                    tint = Color.White.copy(alpha = 0.7f),
+                    tint = Color.White.copy(alpha = 0.8f),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 4.dp)
+                        .size(20.dp)
                 )
             }
         }

@@ -16,7 +16,8 @@ data class AllSettings(
     val themePreference: ThemePreference,
     val fitToA4: Boolean,
     val defaultOcrLanguage: OcrLanguage,
-    val defaultOcrMode: OcrMode
+    val defaultOcrMode: OcrMode,
+    val trashRetentionDays: Int = 7
 )
 
 /**

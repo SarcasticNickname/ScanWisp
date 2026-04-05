@@ -145,6 +145,7 @@ dependencies {
 
     // --- OCR - распорзнавание речи ---
     implementation(libs.tesseract4android)
+    implementation(libs.telephoto.zoomable.coil)
 
     // --- Google Services ---
     implementation(libs.google.ads)

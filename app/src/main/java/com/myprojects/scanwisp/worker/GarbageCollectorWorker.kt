@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.myprojects.scanwisp.data.local.DocumentDao
+import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -17,20 +18,28 @@ import timber.log.Timber
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-private const val DELETION_RETENTION_DAYS = 7L
-
 @HiltWorker
 class GarbageCollectorWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val documentDao: DocumentDao
+    private val documentDao: DocumentDao,
+    private val settingsRepository: SettingsRepository
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             Timber.d("Starting garbage collection work for soft-deleted documents.")
+
+            val retentionDays = settingsRepository.trashRetentionDays.first()
+
+            // -1 означает «никогда не удалять автоматически»
+            if (retentionDays < 0) {
+                Timber.d("Auto-deletion disabled (retention = never). Work skipped.")
+                return@withContext Result.success()
+            }
+
             val cutoffTimestamp =
-                System.currentTimeMillis() - TimeUnit.DAYS.toMillis(DELETION_RETENTION_DAYS)
+                System.currentTimeMillis() - TimeUnit.DAYS.toMillis(retentionDays.toLong())
 
             val documentsToDelete = documentDao.getDocumentsPendingDeletion(cutoffTimestamp)
             if (documentsToDelete.isEmpty()) {
@@ -58,15 +67,12 @@ class GarbageCollectorWorker @AssistedInject constructor(
             }
 
             val idsToDelete = documentsToDelete.map { it.id }
-            // FTS sync перед удалением из БД
             idsToDelete.forEach { docId ->
                 documentDao.deleteFtsEntriesForDocument(docId)
             }
             documentDao.deleteDocumentsByIds(idsToDelete)
 
-            Timber.d(
-                "Garbage collection finished. Permanently deleted ${idsToDelete.size} documents."
-            )
+            Timber.d("Garbage collection finished. Permanently deleted ${idsToDelete.size} documents.")
             return@withContext Result.success()
 
         } catch (e: Exception) {
@@ -79,9 +85,7 @@ class GarbageCollectorWorker @AssistedInject constructor(
         if (path.isNullOrBlank()) return
         try {
             val file = File(path)
-            if (file.exists()) {
-                file.delete()
-            }
+            if (file.exists()) file.delete()
         } catch (e: Exception) {
             Timber.e(e, "Failed to delete file: $path")
         }

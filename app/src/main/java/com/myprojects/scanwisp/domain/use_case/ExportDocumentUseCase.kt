@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.FileProvider
 import com.myprojects.scanwisp.domain.model.ExportFormat
 import com.myprojects.scanwisp.domain.model.ExportResult
+import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import com.myprojects.scanwisp.utils.JpegExportService
@@ -37,7 +38,11 @@ class ExportDocumentUseCase @Inject constructor(
      * @return [ExportResult], содержащий Uri и временный файл, или null в случае ошибки.
      */
     suspend operator fun invoke(
-        pageIds: List<String>, displayName: String, format: ExportFormat
+        pageIds: List<String>,
+        displayName: String,
+        format: ExportFormat,
+        pdfProfile: PdfExportProfile? = null,
+        fitToA4Override: Boolean? = null
     ): ExportResult? {
         if (pageIds.isEmpty()) {
             Timber.w("Cannot export with empty page list.")
@@ -61,8 +66,8 @@ class ExportDocumentUseCase @Inject constructor(
         val tempFile = when (format) {
 
             ExportFormat.PDF -> {
-                val exportProfile = settingsRepository.pdfExportProfile.first()
-                val fitToA4 = settingsRepository.fitToA4.first()
+                val exportProfile = pdfProfile ?: settingsRepository.pdfExportProfile.first()
+                val fitToA4 = fitToA4Override ?: settingsRepository.fitToA4.first()
                 pdfExportService.exportToPdf(
                     pages   = pagesToExport,
                     title   = baseName,

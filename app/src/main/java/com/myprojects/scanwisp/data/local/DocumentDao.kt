@@ -29,6 +29,17 @@ data class DocumentRow(
     val ocrDoneCount: Int
 )
 
+/** Расширенная строка для Корзины — содержит дату удаления */
+@Immutable
+data class TrashDocumentRow(
+    val id: String,
+    val title: String,
+    val coverImagePath: String,
+    val creationTimestamp: Long,
+    val pageCount: Int,
+    val deletionTimestamp: Long
+)
+
 @Dao
 interface DocumentDao {
 
@@ -140,6 +151,18 @@ interface DocumentDao {
     """)
     fun getDeletedDocumentRows(): Flow<List<DocumentRow>>
 
+    @Query("""
+        SELECT d.id, d.title, d.coverImagePath, d.creationTimestamp, d.deletionTimestamp,
+               IFNULL(p.pageCount, 0) AS pageCount
+        FROM documents d
+        LEFT JOIN (
+            SELECT documentOwnerId, COUNT(id) AS pageCount FROM pages GROUP BY documentOwnerId
+        ) p ON d.id = p.documentOwnerId
+        WHERE d.deletionTimestamp IS NOT NULL
+        ORDER BY d.deletionTimestamp DESC
+    """)
+    fun getDeletedDocumentsWithDate(): Flow<List<TrashDocumentRow>>
+
     @Query("UPDATE documents SET deletionTimestamp = NULL, folderId = :folderId WHERE id = :documentId")
     suspend fun restoreDocumentToFolder(documentId: String, folderId: String)
 
@@ -194,6 +217,20 @@ interface DocumentDao {
 
     @Query("SELECT COUNT(id) FROM pages WHERE documentOwnerId = :documentId")
     suspend fun getPageCount(documentId: String): Int
+
+    @Query("""
+        SELECT id FROM pages
+        WHERE documentOwnerId = :documentOwnerId AND position < :currentPosition
+        ORDER BY position DESC LIMIT 1
+    """)
+    suspend fun getPrevPageId(documentOwnerId: String, currentPosition: Long): String?
+
+    @Query("""
+        SELECT id FROM pages
+        WHERE documentOwnerId = :documentOwnerId AND position > :currentPosition
+        ORDER BY position ASC LIMIT 1
+    """)
+    suspend fun getNextPageId(documentOwnerId: String, currentPosition: Long): String?
 
     @Update
     suspend fun updatePage(page: PageEntity)

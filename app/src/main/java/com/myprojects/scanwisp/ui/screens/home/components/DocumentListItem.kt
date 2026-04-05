@@ -27,7 +27,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -162,31 +161,20 @@ fun DocumentListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
+                val ocrSuffix = when {
+                    isSelected -> ""
+                    documentRow.ocrDoneCount >= documentRow.pageCount -> ""
+                    documentRow.ocrDoneCount > 0 ->
+                        "  ·  OCR ${documentRow.ocrDoneCount}/${documentRow.pageCount}"
+                    else -> ""
+                }
                 Text(
-                    text = "$pagesCountText • $formattedDate",
+                    text = "$pagesCountText • $formattedDate$ocrSuffix",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                if (!isSelected && documentRow.ocrDoneCount < documentRow.pageCount) {
-                    val isProcessing = documentRow.ocrDoneCount > 0
-                    Surface(
-                        modifier = Modifier
-                            .padding(6.dp),
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
-                    ) {
-                        Text(
-                            text = if (isProcessing)
-                                "${documentRow.ocrDoneCount}/${documentRow.pageCount}"
-                            else
-                                stringResource(R.string.ocr_status_not_recognized),
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
             }
 
             Box {

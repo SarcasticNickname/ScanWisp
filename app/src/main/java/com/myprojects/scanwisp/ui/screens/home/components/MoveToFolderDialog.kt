@@ -10,15 +10,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -30,27 +37,89 @@ import com.myprojects.scanwisp.data.local.model.FolderEntity
 fun MoveToFolderDialog(
     folders: List<FolderEntity>,
     onDismissRequest: () -> Unit,
-    onFolderSelected: (String?) -> Unit // String? для возможности перемещения в корень
+    onFolderSelected: (String?) -> Unit,
+    onCreateFolder: ((String) -> Unit)? = null   // null = фича отключена
 ) {
+    var showCreateField by remember { mutableStateOf(false) }
+    var newFolderName by rememberSaveable { mutableStateOf("") }
+
     AlertDialog(
         onDismissRequest = onDismissRequest,
         title = { Text(stringResource(R.string.dialog_move_title)) },
         text = {
             LazyColumn {
-                // Опция для перемещения на главный экран (в корень)
-                item(key = "no_folder_option") {
+                // Главный экран (без папки)
+                item(key = "no_folder") {
                     FolderSelectionItem(
                         name = stringResource(R.string.dialog_move_option_no_folder),
-                        onClick = { onFolderSelected(null) })
+                        onClick = { onFolderSelected(null) }
+                    )
                     HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                 }
-                items(
-                    items = folders,
-                    key = { folder -> folder.id }
-                ) { folder ->
+
+                // Существующие папки
+                items(items = folders, key = { it.id }) { folder ->
                     FolderSelectionItem(
                         name = folder.name,
-                        onClick = { onFolderSelected(folder.id) })
+                        onClick = { onFolderSelected(folder.id) }
+                    )
+                }
+
+                // Кнопка «Создать папку» и поле ввода — только если колбэк передан
+                if (onCreateFolder != null) {
+                    item(key = "create_folder") {
+                        HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+                        if (!showCreateField) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showCreateField = true }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    text = "Новая папка…",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = newFolderName,
+                                    onValueChange = { newFolderName = it },
+                                    label = { Text(stringResource(R.string.dialog_create_folder_label)) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        if (newFolderName.isNotBlank()) {
+                                            onCreateFolder(newFolderName)
+                                            newFolderName = ""
+                                            showCreateField = false
+                                        }
+                                    },
+                                    enabled = newFolderName.isNotBlank()
+                                ) {
+                                    Text(stringResource(R.string.action_create))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -76,7 +145,7 @@ private fun FolderSelectionItem(name: String, onClick: () -> Unit) {
             contentDescription = stringResource(R.string.cd_icon_folder),
             modifier = Modifier.size(24.dp)
         )
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(Modifier.width(16.dp))
         Text(text = name, style = MaterialTheme.typography.bodyLarge)
     }
 }

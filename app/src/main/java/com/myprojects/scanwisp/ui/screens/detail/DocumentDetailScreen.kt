@@ -270,7 +270,8 @@ fun DocumentDetailScreen(
         MoveToFolderDialog(
             folders = allFolders,
             onDismissRequest = { viewModel.onMoveDialogDismiss() },
-            onFolderSelected = { folderId -> viewModel.onMoveConfirm(folderId) }
+            onFolderSelected = { folderId -> viewModel.onMoveConfirm(folderId) },
+            onCreateFolder = { name -> viewModel.createFolder(name) }
         )
     }
 
@@ -286,12 +287,13 @@ fun DocumentDetailScreen(
     if (shareDialogState.isVisible) {
         ExportBottomSheet(
             onDismissRequest = { viewModel.onShareDialogDismiss() },
-            onConfirm = { format, filename ->
-                viewModel.onShareDialogConfirm(format, filename)
+            onConfirm = { format, filename, pdfProfile, fitToA4 ->
+                viewModel.onShareDialogConfirm(format, filename, pdfProfile, fitToA4)
             },
             pageCount = shareDialogState.pageCount,
             defaultFilename = shareDialogState.defaultName,
-            action = shareDialogState.action
+            action = shareDialogState.action,
+            estimatedSourceBytes = shareDialogState.estimatedBytes
         )
     }
 
@@ -335,11 +337,13 @@ fun DocumentDetailScreen(
                         }
 
                         else -> {
-                            val title =
-                                (uiState as? DocumentDetailUiState.Success)?.documentWithPages?.document?.title
-                                    ?: stringResource(R.string.loading)
+                            val successState = uiState as? DocumentDetailUiState.Success
+                            val title = successState?.documentWithPages?.document?.title
+                                ?: stringResource(R.string.loading)
+                            val pageCount = successState?.documentWithPages?.pages?.size ?: 0
+                            val titleWithCount = if (pageCount > 0) "$title · $pageCount стр." else title
                             DefaultTopAppBar(
-                                title = title,
+                                title = titleWithCount,
                                 onNavigateBack = { navController.popBackStack() },
                                 onSortClick = { viewModel.toggleSortMode() },
                                 onTitleClick = { viewModel.onRenameRequest() },
@@ -511,6 +515,7 @@ fun DocumentDetailScreen(
                                         onDismissRequest = { viewModel.onPageMenuDismissed() },
                                         onSetAsCoverClick = { viewModel.setPageAsCover(page.id) },
                                         onShareClick = { viewModel.shareSinglePage(page.id) },
+                                        onRotateClick = { viewModel.rotatePage(page.id) },
                                         onRecognizeFastClick = {
                                             launchOcrWithPermission {
                                                 viewModel.recognizePage(

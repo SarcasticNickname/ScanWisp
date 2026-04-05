@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.myprojects.scanwisp.data.local.DocumentDao
 import com.myprojects.scanwisp.data.local.DocumentRow
+import com.myprojects.scanwisp.data.local.TrashDocumentRow
 import com.myprojects.scanwisp.data.local.PageSearchResult
 import com.myprojects.scanwisp.data.local.model.DocumentEntity
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
@@ -316,6 +317,40 @@ class DocumentRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun rotatePage(pageId: String, degrees: Float) {
+        withContext(Dispatchers.IO) {
+            val page = dao.getPageByIdOnce(pageId) ?: return@withContext
+            val result = imageProcessor.rotateImageFile(
+                processedImagePath = page.processedImagePath,
+                thumbnailPath = page.thumbnailPath,
+                degrees = degrees
+            ) ?: return@withContext
+
+            // Coil кешируется по пути — инвалидируем через touch файла
+            File(result.processedImagePath).setLastModified(System.currentTimeMillis())
+            File(result.thumbnailPath).setLastModified(System.currentTimeMillis())
+
+            // Если это обложка документа — обновляем её тоже
+            val document = dao.getDocumentById(page.documentOwnerId)
+            if (document != null && document.coverImagePath == page.thumbnailPath) {
+                updateDocumentCover(document.id, result.thumbnailPath)
+            }
+        }
+    }
+
+    override suspend fun getAdjacentPageIds(
+        documentOwnerId: String,
+        currentPosition: Long
+    ): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        Pair(
+            dao.getPrevPageId(documentOwnerId, currentPosition),
+            dao.getNextPageId(documentOwnerId, currentPosition)
+        )
+    }
+
+    override suspend fun getPageCount(documentOwnerId: String): Int =
+        withContext(Dispatchers.IO) { dao.getPageCount(documentOwnerId) }
+
     override fun getAllFolders(): Flow<List<FolderEntity>> {
         return dao.getAllFolders()
     }
@@ -326,6 +361,15 @@ class DocumentRepositoryImpl @Inject constructor(
             creationTimestamp = System.currentTimeMillis()
         )
         dao.insertFolder(newFolder)
+    }
+
+    override suspend fun renameFolder(folderId: String, newName: String) {
+        val folder = dao.getFolderById(folderId) ?: return
+        dao.updateFolder(folder.copy(name = newName))
+    }
+
+    override suspend fun deleteFolder(folderId: String) {
+        dao.deleteFolderById(folderId)
     }
 
     override suspend fun moveDocumentsToFolder(documentIds: List<String>, folderId: String?) {
@@ -477,6 +521,10 @@ class DocumentRepositoryImpl @Inject constructor(
 
     override fun getDeletedDocumentRows(): Flow<List<DocumentRow>> {
         return dao.getDeletedDocumentRows()
+    }
+
+    override fun getDeletedDocumentsWithDate(): Flow<List<TrashDocumentRow>> {
+        return dao.getDeletedDocumentsWithDate()
     }
 
     override suspend fun restoreDocument(documentId: String) {

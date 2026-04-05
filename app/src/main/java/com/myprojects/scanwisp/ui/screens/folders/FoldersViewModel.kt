@@ -20,10 +20,6 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * ИЗМЕНЕНИЕ: Класс состояния теперь хранит один смешанный список `items`,
- * который может содержать как папки, так и рекламу.
- */
 @Immutable
 data class FoldersScreenState(
     val items: List<Any> = emptyList(),
@@ -42,8 +38,17 @@ class FoldersViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<FoldersUiState>(FoldersUiState.Loading)
     val uiState = _uiState.asStateFlow()
 
-    private val _isDialogVisible = MutableStateFlow(false)
-    val isDialogVisible = _isDialogVisible.asStateFlow()
+    // --- Диалог создания ---
+    private val _isCreateDialogVisible = MutableStateFlow(false)
+    val isCreateDialogVisible = _isCreateDialogVisible.asStateFlow()
+
+    // --- Диалог переименования ---
+    private val _renamingFolder = MutableStateFlow<FolderWithDocumentCount?>(null)
+    val renamingFolder = _renamingFolder.asStateFlow()
+
+    // --- Диалог подтверждения удаления ---
+    private val _deletingFolder = MutableStateFlow<FolderWithDocumentCount?>(null)
+    val deletingFolder = _deletingFolder.asStateFlow()
 
     private val _uiEventFlow = MutableSharedFlow<UiEvent>()
     val uiEventFlow = _uiEventFlow.asSharedFlow()
@@ -52,71 +57,92 @@ class FoldersViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getFoldersWithDocumentCount()
                 .catch { e ->
-                    crashlytics.recordException(e) // <-- ДОБАВИТЬ
+                    crashlytics.recordException(e)
                     _uiState.value = FoldersUiState.Error(AppError.LoadDataError)
                 }
                 .collect { folders ->
-                    val combinedList = insertAdsIntoList(folders)
-                    // Обновляем состояние Success
-                    _uiState.value = FoldersUiState.Success(items = combinedList)
+                    _uiState.value = FoldersUiState.Success(items = insertAdsIntoList(folders))
                 }
         }
     }
 
-    /**
-     * НОВЫЙ МЕТОД: Вставляет рекламу в список папок согласно правилам из Remote Config.
-     * Логика идентична той, что в HomeViewModel.
-     */
     private fun insertAdsIntoList(folders: List<FolderWithDocumentCount>): List<Any> {
-        if (!remoteConfigRepository.isNativeAdEnabled() || folders.isEmpty()) {
-            return folders
-        }
-
+        if (!remoteConfigRepository.isNativeAdEnabled() || folders.isEmpty()) return folders
         val startPosition = remoteConfigRepository.getNativeAdStartPosition()
         val interval = remoteConfigRepository.getNativeAdInterval()
-
         val combinedList = mutableListOf<Any>()
         var itemsSinceLastAd = 0
-
         folders.forEachIndexed { index, folder ->
             combinedList.add(folder)
             itemsSinceLastAd++
-
-            val isAfterStartPosition = (index + 1) >= startPosition
-            val isIntervalReached = itemsSinceLastAd >= interval
-
-            if (isAfterStartPosition && isIntervalReached) {
+            if ((index + 1) >= startPosition && itemsSinceLastAd >= interval) {
                 adPoolManager.getAd()?.let { ad ->
                     combinedList.add(ad)
-                    itemsSinceLastAd = 0 // Сбрасываем счетчик
+                    itemsSinceLastAd = 0
                 }
             }
         }
         return combinedList
     }
 
-    fun onAddFolderRequest() {
-        _isDialogVisible.value = true
-    }
+    // --- Создание ---
 
-    fun onDialogDismiss() {
-        _isDialogVisible.value = false
-    }
+    fun onAddFolderRequest() { _isCreateDialogVisible.value = true }
+    fun onDialogDismiss() { _isCreateDialogVisible.value = false }
 
     fun createFolder(name: String) {
         if (name.isBlank()) return
         viewModelScope.launch {
             try {
-
-                // --- АНАЛИТИКА ---
                 analytics.logEvent("folder_created", null)
-
                 repository.createFolder(name)
                 onDialogDismiss()
             } catch (e: Exception) {
                 onDialogDismiss()
                 crashlytics.recordException(e)
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
+    // --- Переименование ---
+
+    fun onRenameRequest(folder: FolderWithDocumentCount) { _renamingFolder.value = folder }
+    fun onRenameDismiss() { _renamingFolder.value = null }
+
+    fun onRenameConfirm(newName: String) {
+        val folder = _renamingFolder.value ?: return
+        if (newName.isBlank()) { onRenameDismiss(); return }
+        viewModelScope.launch {
+            try {
+                analytics.logEvent("folder_renamed", null)
+                repository.renameFolder(folder.folder.id, newName)
+            } catch (e: Exception) {
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            } finally {
+                onRenameDismiss()
+            }
+        }
+    }
+
+    // --- Удаление ---
+
+    fun onDeleteRequest(folder: FolderWithDocumentCount) { _deletingFolder.value = folder }
+    fun onDeleteDismiss() { _deletingFolder.value = null }
+
+    fun onDeleteConfirm() {
+        val folder = _deletingFolder.value ?: return
+        viewModelScope.launch {
+            try {
+                analytics.logEvent("folder_deleted", null)
+                repository.deleteFolder(folder.folder.id)
+                _uiEventFlow.emit(UiEvent.ShowSnackbar("Папка «${folder.folder.name}» удалена"))
+            } catch (e: Exception) {
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            } finally {
+                onDeleteDismiss()
             }
         }
     }

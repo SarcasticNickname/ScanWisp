@@ -23,6 +23,7 @@ import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ExportFormat
+import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.model.SortBy
 import com.myprojects.scanwisp.domain.model.SortOrder
 import com.myprojects.scanwisp.domain.model.ViewMode
@@ -73,7 +74,8 @@ data class ShareDialogState(
     val isVisible: Boolean = false,
     val pageCount: Int = 0,
     val defaultName: String = "",
-    val action: ExportAction = ExportAction.SHARE
+    val action: ExportAction = ExportAction.SHARE,
+    val estimatedBytes: Long = 0L
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -126,7 +128,8 @@ class HomeViewModel @Inject constructor(
                     isVisible = s.isVisible,
                     pageCount = s.pageCount,
                     defaultName = s.defaultName,
-                    action = s.action
+                    action = s.action,
+                    estimatedBytes = s.estimatedBytes
                 )
             }
             .stateIn(
@@ -573,10 +576,15 @@ class HomeViewModel @Inject constructor(
         clearSelection()
     }
 
-    fun onShareDialogConfirm(format: ExportFormat, filename: String) {
+    fun onShareDialogConfirm(
+        format: ExportFormat,
+        filename: String,
+        pdfProfile: PdfExportProfile? = null,
+        fitToA4: Boolean? = null
+    ) {
         viewModelScope.launch {
             _loadingState.update { it.copy(isBusy = true, message = "Экспорт...") }
-            val event = exportManager.onConfirmExport(format, filename)
+            val event = exportManager.onConfirmExport(format, filename, pdfProfile, fitToA4)
             _uiEventFlow.emit(event)
             if (event is UiEvent.LaunchSaveIntent) {
                 _uiEventFlow.emit(UiEvent.RequestInAppReview)
@@ -638,6 +646,18 @@ class HomeViewModel @Inject constructor(
                 documentRepository.moveDocumentsToFolder(listOf(documentId), folderId)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to move document")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
+    fun createFolder(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            try {
+                documentRepository.createFolder(name)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to create folder")
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }

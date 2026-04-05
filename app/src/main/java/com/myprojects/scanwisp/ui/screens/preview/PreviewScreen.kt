@@ -6,7 +6,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,20 +22,21 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.TextSnippet
-import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,15 +50,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import coil.compose.SubcomposeAsyncImage
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.myprojects.scanwisp.R
 import com.myprojects.scanwisp.domain.model.AppError
@@ -67,7 +67,10 @@ import com.myprojects.scanwisp.ui.components.ErrorDialog
 import com.myprojects.scanwisp.ui.components.ErrorState
 import com.myprojects.scanwisp.ui.components.FullScreenLoader
 import com.myprojects.scanwisp.ui.events.UiEvent
+import com.myprojects.scanwisp.ui.navigation.Screen
+import com.myprojects.scanwisp.ui.screens.preview.components.TokenEditorSheet
 import kotlinx.coroutines.flow.collectLatest
+import me.saket.telephoto.zoomable.coil.ZoomableAsyncImage
 import timber.log.Timber
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,60 +82,67 @@ fun PreviewScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val loadingState by viewModel.loadingState.collectAsStateWithLifecycle()
     val recognizedText by viewModel.recognizedText.collectAsStateWithLifecycle()
-    val canImprove by viewModel.canImprove.collectAsStateWithLifecycle()
+    val isSheetVisible by viewModel.isSheetVisible.collectAsStateWithLifecycle()
     val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
-    val editBuffer by viewModel.editBuffer.collectAsStateWithLifecycle()
+    val textEditMode by viewModel.textEditMode.collectAsStateWithLifecycle()
+    val editableWords by viewModel.editableWords.collectAsStateWithLifecycle()
+    val activeWordId by viewModel.activeWordId.collectAsStateWithLifecycle()
+    val freeTextBuffer by viewModel.freeTextBuffer.collectAsStateWithLifecycle()
     val showOverwriteWarning by viewModel.showOverwriteWarning.collectAsStateWithLifecycle()
+    val showRescanConf by viewModel.showRescanConfirmation.collectAsStateWithLifecycle()
+    val showSwitchModeDialog by viewModel.showSwitchModeDialog.collectAsStateWithLifecycle()
+    val prevPageId by viewModel.prevPageId.collectAsStateWithLifecycle()
+    val nextPageId by viewModel.nextPageId.collectAsStateWithLifecycle()
+    val totalPages by viewModel.totalPages.collectAsStateWithLifecycle()
+
     val context = LocalContext.current
     val activity = context as? Activity
+    val clipboardMgr = LocalClipboardManager.current
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
 
-    var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
+    var errorToShow by remember { mutableStateOf<AppError?>(null) }
 
+    // Лаунчер сканера (пересъёмка)
     val scannerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartIntentSenderForResult()
+        ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val scanningResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-
-            // Берём первую страницу — нам нужна одна картинка для замены
-            val newUri = scanningResult?.pages?.firstOrNull()?.imageUri
-
-            if (newUri != null) {
-                val flags =
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-
-                // Закрепляем доступ к content:// URI на всякий случай
+            val uri = GmsDocumentScanningResult
+                .fromActivityResultIntent(result.data)
+                ?.pages?.firstOrNull()?.imageUri
+            if (uri != null) {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 try {
-                    context.contentResolver.takePersistableUriPermission(newUri, flags)
-                } catch (_: SecurityException) { /* провайдер мог не дать persist */
-                }
-
-                try {
-                    context.grantUriPermission(context.packageName, newUri, flags)
+                    context.contentResolver.takePersistableUriPermission(uri, flags)
                 } catch (_: SecurityException) {
                 }
-
-                // Собственно, замена изображения текущей страницы
-                viewModel.replaceImage(newUri)
+                try {
+                    context.grantUriPermission(context.packageName, uri, flags)
+                } catch (_: SecurityException) {
+                }
+                viewModel.replaceImage(uri)
             } else {
                 Toast.makeText(context, R.string.toast_replace_cancelled, Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.replaceImage(uri)
-        } else {
-            Toast.makeText(context, R.string.toast_replace_cancelled, Toast.LENGTH_SHORT).show()
+    val galleryLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) viewModel.replaceImage(uri)
+            else Toast.makeText(context, R.string.toast_replace_cancelled, Toast.LENGTH_SHORT)
+                .show()
         }
-    }
 
-    LaunchedEffect(key1 = true) {
+    LaunchedEffect(Unit) {
         viewModel.uiEventFlow.collectLatest { event ->
             when (event) {
+                is UiEvent.TriggerRescan -> {
+                    if (activity != null) viewModel.launchRescan(activity)
+                    else Timber.e("Context is not an Activity")
+                }
+
                 is UiEvent.LaunchScanner -> {
                     val req = IntentSenderRequest.Builder(event.intentSender)
                         .setFillInIntent(
@@ -141,8 +151,7 @@ fun PreviewScreen(
                                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                                         Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                             )
-                        )
-                        .build()
+                        ).build()
                     scannerLauncher.launch(req)
                 }
 
@@ -156,7 +165,7 @@ fun PreviewScreen(
                 }
 
                 is UiEvent.ShowErrorDialog -> {
-                    errorToShowInDialog = event.error
+                    errorToShow = event.error
                 }
 
                 else -> Unit
@@ -164,10 +173,14 @@ fun PreviewScreen(
         }
     }
 
+    val pageNumber = (uiState as? PreviewUiState.Success)?.page?.pageNumber ?: 0
+    val title = if (totalPages > 0) "Страница $pageNumber из $totalPages"
+    else stringResource(R.string.preview_screen_title)
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.preview_screen_title)) },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(
@@ -177,26 +190,15 @@ fun PreviewScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.onRecognizeTextClicked() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.TextSnippet,
-                            contentDescription = "Распознать текст"
-                        )
+                    TextButton(onClick = { viewModel.onRecognizeTextClicked() }) {
+                        Text("Распознать текст")
                     }
-                    TextButton(onClick = {
-                        if (activity != null) {
-                            viewModel.onRescanClicked(activity)
-                        } else {
-                            Timber.e(
-                                "Context is not an Activity, cannot start scanner."
-                            )
-                        }
-                    }) {
+                    TextButton(onClick = { viewModel.onRescanButtonClicked() }) {
                         Icon(
-                            Icons.Default.Replay,
-                            contentDescription = stringResource(R.string.preview_action_rescan)
+                            Icons.Default.Replay, contentDescription = null,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.preview_action_rescan))
                     }
                 }
@@ -210,135 +212,146 @@ fun PreviewScreen(
             contentAlignment = Alignment.Center
         ) {
             when (val state = uiState) {
-                is PreviewUiState.Loading -> {
-                    CircularProgressIndicator()
-                }
+                is PreviewUiState.Loading -> CircularProgressIndicator()
 
-                is PreviewUiState.Error -> {
+                is PreviewUiState.Error ->
                     ErrorState(error = state.error, modifier = Modifier.fillMaxSize())
-                }
 
                 is PreviewUiState.Success -> {
-                    SubcomposeAsyncImage(
+                    // Изображение с pinch-to-zoom
+                    ZoomableAsyncImage(
                         model = state.page.processedImagePath,
                         contentDescription = stringResource(R.string.preview_cd_page_content),
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit,
-                        loading = {
-                            CircularProgressIndicator()
-                        },
-                        error = {
-                            Image(
-                                painter = painterResource(id = R.drawable.card_placeholder),
-                                contentDescription = stringResource(R.string.error_loading_image)
-                            )
-                        }
+                        modifier = Modifier.fillMaxSize()
                     )
-                }
-            }
-            FullScreenLoader(loadingState = loadingState)
 
-            // --- ОТОБРАЖЕНИЕ ТЕКСТА ---
-            if (recognizedText != null) {
-                val sheetState = rememberModalBottomSheetState()
-                ModalBottomSheet(
-                    onDismissRequest = { viewModel.dismissTextDialog() },
-                    sheetState = sheetState
-                ) {
-                    Box(
+                    // Стрелки prev / next
+                    Row(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp)
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-
-                            // Заголовок + кнопки действий
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (isEditMode) "Редактирование" else "Распознанный текст",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.weight(1f)
+                        if (prevPageId != null) {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    navController.navigate(Screen.PreviewPage.createRoute(prevPageId!!)) {
+                                        popUpTo(Screen.PreviewPage.route) { inclusive = true }
+                                    }
+                                },
+                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
                                 )
-                                if (!isEditMode) {
-                                    // Кнопка перехода в режим редактирования
-                                    IconButton(onClick = { viewModel.onEditTextClicked() }) {
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            contentDescription = "Редактировать"
-                                        )
+                            ) { Icon(Icons.AutoMirrored.Filled.ArrowBackIos, "Предыдущая") }
+                        } else {
+                            Spacer(Modifier.size(40.dp))
+                        }
+
+                        if (nextPageId != null) {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    navController.navigate(Screen.PreviewPage.createRoute(nextPageId!!)) {
+                                        popUpTo(Screen.PreviewPage.route) { inclusive = true }
                                     }
-                                }
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-
-                            if (isEditMode) {
-                                // --- Режим редактирования ---
-                                OutlinedTextField(
-                                    value = editBuffer,
-                                    onValueChange = { viewModel.onEditBufferChanged(it) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = 200.dp),
-                                    textStyle = MaterialTheme.typography.bodyLarge
+                                },
+                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
                                 )
-                                Spacer(Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
-                                ) {
-                                    TextButton(onClick = { viewModel.onCancelEditClicked() }) {
-                                        Text("Отмена")
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(onClick = { viewModel.onSaveEditClicked() }) {
-                                        Text("Сохранить")
-                                    }
-                                }
-                            } else {
-                                // --- Режим просмотра ---
-                                if (canImprove) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.onImproveRecognitionClicked() },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(bottom = 12.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.AutoFixHigh, contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(stringResource(R.string.preview_action_improve_ocr))
-                                    }
-                                }
-                                SelectionContainer {
-                                    Text(
-                                        text = recognizedText!!,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        modifier = Modifier.verticalScroll(rememberScrollState())
-                                    )
-                                }
-                            }
-
-                            Spacer(Modifier.height(32.dp))
+                            ) { Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, "Следующая") }
+                        } else {
+                            Spacer(Modifier.size(40.dp))
                         }
                     }
+                }
+            }
+
+            FullScreenLoader(loadingState = loadingState)
+        }
+    }
+
+    // ─── Шторка ────────────────────────────────────────────────────────────
+
+    if (isSheetVisible && recognizedText != null) {
+        ModalBottomSheet(
+            onDismissRequest = { viewModel.onSheetDismissed() },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        ) {
+            if (isEditMode) {
+                // ── Режим редактирования ──────────────────────────────────
+                TokenEditorSheet(
+                    editableWords = editableWords,
+                    activeWordId = activeWordId,
+                    editMode = textEditMode,
+                    freeTextBuffer = freeTextBuffer,
+                    showSwitchModeDialog = showSwitchModeDialog,
+                    onWordTap = viewModel::onWordTap,
+                    onWordLongPress = { id ->
+                        val word = editableWords.find { it.id == id }
+                        if (word?.isDeleted == true) viewModel.onWordRestore(id)
+                        else viewModel.onWordDelete(id)
+                    },
+                    onWordTextCommit = viewModel::onWordTextCommit,
+                    onWordEditCancel = viewModel::onWordEditCancel,
+                    onFreeTextChanged = viewModel::onFreeTextBufferChanged,
+                    onSwitchToFreeTextRequest = viewModel::onSwitchToFreeTextRequest,
+                    onSwitchToTokenMode = viewModel::onSwitchToTokenMode,
+                    onSwitchModeConfirmed = viewModel::onSwitchModeConfirmed,
+                    onSwitchModeDismissed = viewModel::onSwitchModeDismissed,
+                    onSave = viewModel::onSaveEditClicked,
+                    onCancel = viewModel::onCancelEditClicked,
+                    modifier = Modifier.heightIn(max = (screenHeightDp * 0.6f).dp)
+                )
+            } else {
+                // ── Режим просмотра ───────────────────────────────────────
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = (screenHeightDp * 0.55f).dp)
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Распознанный текст",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        // Копировать всё
+                        IconButton(onClick = {
+                            clipboardMgr.setText(AnnotatedString(recognizedText!!))
+                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Копировать всё")
+                        }
+                        // Войти в режим редактирования
+                        IconButton(onClick = { viewModel.onEditTextClicked() }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Редактировать")
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    SelectionContainer {
+                        Text(
+                            text = recognizedText!!,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                        )
+                    }
+
+                    Spacer(Modifier.heightIn(min = 24.dp))
                 }
             }
         }
     }
 
-
-    errorToShowInDialog?.let { error ->
-        ErrorDialog(
-            error = error,
-            onDismiss = { errorToShowInDialog = null }
-        )
-    }
+    // ─── Диалог: перезаписать отредактированный текст? ─────────────────────
 
     if (showOverwriteWarning) {
         AlertDialog(
@@ -352,5 +365,25 @@ fun PreviewScreen(
                 TextButton(onClick = { viewModel.onOverwriteDismissed() }) { Text("Отмена") }
             }
         )
+    }
+
+    // ─── Диалог: подтверждение пересъёмки ──────────────────────────────────
+
+    if (showRescanConf) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onRescanDismissed() },
+            title = { Text("Переснять страницу?") },
+            text = { Text("Текущее изображение будет заменено. Распознанный текст сбросится.") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onRescanConfirmed() }) { Text("Переснять") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.onRescanDismissed() }) { Text("Отмена") }
+            }
+        )
+    }
+
+    errorToShow?.let { error ->
+        ErrorDialog(error = error, onDismiss = { errorToShow = null })
     }
 }

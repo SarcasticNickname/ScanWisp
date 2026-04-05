@@ -153,21 +153,33 @@ fun DocumentCard(
                 }
                 if (!isSelected && documentRow.ocrDoneCount < documentRow.pageCount) {
                     val isProcessing = documentRow.ocrDoneCount > 0
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp),
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
-                    ) {
-                        Text(
-                            text = if (isProcessing)
-                                "${documentRow.ocrDoneCount}/${documentRow.pageCount}"
-                            else
-                                stringResource(R.string.ocr_status_not_recognized),
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                    if (isProcessing) {
+                        // Прогресс распознавания — показываем счётчик
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(6.dp),
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
+                        ) {
+                            Text(
+                                text = "${documentRow.ocrDoneCount}/${documentRow.pageCount}",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    } else {
+                        // Нет OCR — тихая точка, не отвлекает
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp)
+                                .size(8.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.tertiaryContainer,
+                                    CircleShape
+                                )
                         )
                     }
                 }

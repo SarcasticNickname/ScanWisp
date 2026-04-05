@@ -26,6 +26,7 @@ import com.myprojects.scanwisp.domain.model.AppError
 import com.myprojects.scanwisp.domain.model.ExportFormat
 import com.myprojects.scanwisp.domain.model.OcrMode
 import com.myprojects.scanwisp.domain.model.OcrStatus
+import com.myprojects.scanwisp.domain.model.PdfExportProfile
 import com.myprojects.scanwisp.domain.repository.DocumentRepository
 import com.myprojects.scanwisp.domain.repository.SettingsRepository
 import com.myprojects.scanwisp.domain.repository.StringProvider
@@ -243,6 +244,19 @@ class DocumentDetailViewModel @Inject constructor(
         }
     }
 
+    fun createFolder(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            try {
+                repository.createFolder(name)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to create folder")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
     fun onShareAllPagesRequest() {
         val allPageIds = documentFlow.value?.pages?.map { it.id }?.toSet() ?: emptySet()
         if (allPageIds.isNotEmpty()) {
@@ -261,6 +275,22 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun onPageMenuDismissed() {
         _expandedMenuPageId.value = null
+    }
+
+    fun rotatePage(pageId: String, degrees: Float = 90f) {
+        viewModelScope.launch {
+            _loadingState.update { it.copy(isBusy = true) }
+            try {
+                repository.rotatePage(pageId, degrees)
+                analytics.logEvent("page_rotated", null)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to rotate page")
+                crashlytics.recordException(e)
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.ImageProcessingError))
+            } finally {
+                _loadingState.update { it.copy(isBusy = false) }
+            }
+        }
     }
 
     fun setPageAsCover(pageId: String) {
@@ -282,7 +312,9 @@ class DocumentDetailViewModel @Inject constructor(
 
     fun shareSinglePage(pageId: String) {
         val documentTitle = documentFlow.value?.document?.title ?: "Страница"
-        exportManager.requestExportForPages(listOf(pageId), documentTitle, ExportAction.SHARE)
+        viewModelScope.launch {
+            exportManager.requestExportForPages(listOf(pageId), documentTitle, ExportAction.SHARE)
+        }
     }
 
     fun onRenameRequest() {
@@ -453,7 +485,9 @@ class DocumentDetailViewModel @Inject constructor(
     fun onShareRequest() {
         val pageIds = selectedPageIds.value.toList()
         val documentTitle = documentFlow.value?.document?.title ?: "ScanWisp_Document"
-        exportManager.requestExportForPages(pageIds, documentTitle, ExportAction.SHARE)
+        viewModelScope.launch {
+            exportManager.requestExportForPages(pageIds, documentTitle, ExportAction.SHARE)
+        }
     }
 
     fun onShareDialogDismiss() {
@@ -461,7 +495,12 @@ class DocumentDetailViewModel @Inject constructor(
         clearSelection()
     }
 
-    fun onShareDialogConfirm(format: ExportFormat, filename: String) {
+    fun onShareDialogConfirm(
+        format: ExportFormat,
+        filename: String,
+        pdfProfile: PdfExportProfile? = null,
+        fitToA4: Boolean? = null
+    ) {
         viewModelScope.launch {
             _loadingState.update {
                 it.copy(
@@ -469,7 +508,7 @@ class DocumentDetailViewModel @Inject constructor(
                     message = stringProvider.getString(R.string.loading)
                 )
             }
-            val event = exportManager.onConfirmExport(format, filename)
+            val event = exportManager.onConfirmExport(format, filename, pdfProfile, fitToA4)
             _uiEventFlow.emit(event)
             _loadingState.update { it.copy(isBusy = false) }
             clearSelection()

@@ -3,6 +3,7 @@ package com.myprojects.scanwisp.domain.repository
 import android.net.Uri
 import com.myprojects.scanwisp.data.local.DocumentRow
 import com.myprojects.scanwisp.data.local.PageSearchResult
+import com.myprojects.scanwisp.data.local.TrashDocumentRow
 import com.myprojects.scanwisp.data.local.model.DocumentWithPages
 import com.myprojects.scanwisp.data.local.model.FolderEntity
 import com.myprojects.scanwisp.data.local.model.FolderWithDocumentCount
@@ -39,14 +40,20 @@ interface DocumentRepository {
     fun getPageById(pageId: String): Flow<PageEntity?>
     suspend fun getPagesByIds(pageIds: List<String>): List<PageEntity>
     suspend fun replacePageImage(pageId: String, newImageUri: Uri)
+    suspend fun rotatePage(pageId: String, degrees: Float)
+    suspend fun getAdjacentPageIds(documentOwnerId: String, currentPosition: Long): Pair<String?, String?>
+    suspend fun getPageCount(documentOwnerId: String): Int
     fun getAllFolders(): Flow<List<FolderEntity>>
     suspend fun createFolder(name: String)
+    suspend fun renameFolder(folderId: String, newName: String)
+    suspend fun deleteFolder(folderId: String)
     suspend fun moveDocumentsToFolder(documentIds: List<String>, folderId: String?)
     suspend fun getFolderById(folderId: String): FolderEntity?
     fun getFoldersWithDocumentCount(): Flow<List<FolderWithDocumentCount>>
     suspend fun updateDocumentCover(documentId: String, newCoverPath: String)
 
     fun getDeletedDocumentRows(): Flow<List<DocumentRow>>
+    fun getDeletedDocumentsWithDate(): Flow<List<TrashDocumentRow>>
     suspend fun restoreDocument(documentId: String)
     suspend fun deleteDocumentsPermanently(documentIds: List<String>)
 

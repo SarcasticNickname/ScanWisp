@@ -167,6 +167,45 @@ class ImageProcessor @Inject constructor(
             bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
         }
     }
+
+    /**
+     * Поворачивает уже сохранённый файл на [degrees] градусов (кратно 90).
+     * Перезаписывает файл на месте, обновляет тамбнейл.
+     * Возвращает новый [ProcessedImagePaths] или null при ошибке.
+     */
+    suspend fun rotateImageFile(
+        processedImagePath: String,
+        thumbnailPath: String,
+        degrees: Float
+    ): ProcessedImagePaths? = withContext(Dispatchers.IO) {
+        try {
+            val processedFile = File(processedImagePath)
+            val thumbFile = File(thumbnailPath)
+
+            // Поворачиваем полноразмерный файл
+            val fullBitmap = BitmapFactory.decodeFile(processedImagePath)
+                ?: return@withContext null
+            val rotatedFull = fullBitmap.rotate(degrees)
+            saveBitmapToFile(rotatedFull, processedFile)
+            if (rotatedFull !== fullBitmap) fullBitmap.recycle()
+
+            // Поворачиваем тамбнейл
+            val thumbBitmap = BitmapFactory.decodeFile(thumbnailPath)
+            if (thumbBitmap != null) {
+                val rotatedThumb = thumbBitmap.rotate(degrees)
+                saveBitmapToFile(rotatedThumb, thumbFile)
+                if (rotatedThumb !== thumbBitmap) thumbBitmap.recycle()
+            }
+
+            ProcessedImagePaths(
+                processedImagePath = processedImagePath,
+                thumbnailPath = thumbnailPath
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to rotate image file")
+            null
+        }
+    }
 }
 
 private val ExifInterface.rotationDegrees: Int

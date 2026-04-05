@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.myprojects.scanwisp.domain.model.OcrLanguage
@@ -42,6 +43,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val SORT_HINT_SHOWN = booleanPreferencesKey("sort_hint_shown")
 
         val DEFAULT_OCR_LANGUAGE = stringPreferencesKey("default_ocr_language")
+        val TRASH_RETENTION_DAYS = intPreferencesKey("trash_retention_days")
     }
 
     override val pdfExportProfile: Flow<PdfExportProfile> = context.dataStore.data
@@ -173,7 +175,8 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override val defaultOcrLanguage: Flow<OcrLanguage> = context.dataStore.data
         .map { prefs ->
-            val name = prefs[PreferencesKeys.DEFAULT_OCR_LANGUAGE] ?: OcrLanguage.RUSSIAN_ENGLISH.name
+            val name =
+                prefs[PreferencesKeys.DEFAULT_OCR_LANGUAGE] ?: OcrLanguage.RUSSIAN_ENGLISH.name
             runCatching { OcrLanguage.valueOf(name) }.getOrDefault(OcrLanguage.RUSSIAN_ENGLISH)
         }
 
@@ -181,5 +184,12 @@ class SettingsRepositoryImpl @Inject constructor(
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.DEFAULT_OCR_LANGUAGE] = language.name
         }
+    }
+
+    override val trashRetentionDays: Flow<Int> = context.dataStore.data
+        .map { prefs -> prefs[PreferencesKeys.TRASH_RETENTION_DAYS] ?: 7 }
+
+    override suspend fun saveTrashRetentionDays(days: Int) {
+        context.dataStore.edit { it[PreferencesKeys.TRASH_RETENTION_DAYS] = days }
     }
 }

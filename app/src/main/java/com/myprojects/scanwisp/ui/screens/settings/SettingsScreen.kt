@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material.icons.outlined.BrightnessMedium
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Speed
@@ -73,6 +74,7 @@ fun SettingsScreen(
     var showPdfProfileDialog by remember { mutableStateOf(false) }
     var showOcrLanguageDialog by remember { mutableStateOf(false) }
     var showOcrModeDialog by remember { mutableStateOf(false) }
+    var showTrashRetentionDialog by remember { mutableStateOf(false) }
 
     var errorToShowInDialog by remember { mutableStateOf<AppError?>(null) }
 
@@ -163,6 +165,17 @@ fun SettingsScreen(
 
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
+                    // --- Корзина ---
+                    SettingsCategory("Корзина")
+                    SettingsItem(
+                        icon = Icons.Outlined.DeleteSweep,
+                        title = "Автоочистка корзины",
+                        subtitle = settings.trashRetentionDays.toRetentionLabel(),
+                        onClick = { showTrashRetentionDialog = true }
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
                     // --- О приложении ---
                     SettingsCategory(stringResource(R.string.settings_category_about))
                     SettingsItem(
@@ -227,6 +240,21 @@ fun SettingsScreen(
                         onDismissRequest = { showOcrModeDialog = false },
                         optionToReadableString = { it.toReadableString() },
                         optionToDescription = { it.getDescription() }
+                    )
+                }
+
+                // Диалог автоочистки корзины
+                if (showTrashRetentionDialog) {
+                    SettingsRadioDialog(
+                        title = "Автоочистка корзины",
+                        options = listOf(7, 30, -1),
+                        selectedOption = settings.trashRetentionDays,
+                        onOptionSelected = {
+                            viewModel.onTrashRetentionSelected(it)
+                            showTrashRetentionDialog = false
+                        },
+                        onDismissRequest = { showTrashRetentionDialog = false },
+                        optionToReadableString = { it.toRetentionLabel() }
                     )
                 }
             }
@@ -441,4 +469,11 @@ private fun OcrMode.toReadableString(): String = when (this) {
 private fun OcrMode.getDescription(): String = when (this) {
     OcrMode.FAST -> stringResource(R.string.settings_ocr_mode_fast_desc)
     OcrMode.FULL -> stringResource(R.string.settings_ocr_mode_full_desc)
+}
+
+@Composable
+private fun Int.toRetentionLabel(): String = when (this) {
+    7    -> "Через 7 дней"
+    30   -> "Через 30 дней"
+    else -> "Никогда"
 }

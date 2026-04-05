@@ -40,15 +40,23 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.themePreference,
         settingsRepository.fitToA4,
         settingsRepository.defaultOcrLanguage,
-        settingsRepository.defaultOcrMode
-    ) { pdfProfile, theme, fitA4, ocrLanguage, ocrMode ->
+        settingsRepository.defaultOcrMode,
+        settingsRepository.trashRetentionDays
+    ) { values ->
+        val pdfProfile   = values[0] as com.myprojects.scanwisp.domain.model.PdfExportProfile
+        val theme        = values[1] as ThemePreference
+        val fitA4        = values[2] as Boolean
+        val ocrLanguage  = values[3] as OcrLanguage
+        val ocrMode      = values[4] as OcrMode
+        val trashDays    = values[5] as Int
         SettingsUiState.Success(
             AllSettings(
-                pdfExportProfile = pdfProfile,
-                themePreference = theme,
-                fitToA4 = fitA4,
-                defaultOcrLanguage = ocrLanguage,
-                defaultOcrMode = ocrMode
+                pdfExportProfile    = pdfProfile,
+                themePreference     = theme,
+                fitToA4             = fitA4,
+                defaultOcrLanguage  = ocrLanguage,
+                defaultOcrMode      = ocrMode,
+                trashRetentionDays  = trashDays
             )
         )
     }
@@ -128,6 +136,18 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.saveDefaultOcrMode(mode)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to save OCR mode")
+                _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
+            }
+        }
+    }
+
+    fun onTrashRetentionSelected(days: Int) {
+        viewModelScope.launch {
+            try {
+                analytics.logEvent("trash_retention_changed", bundleOf("days" to days.toLong()))
+                settingsRepository.saveTrashRetentionDays(days)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save trash retention")
                 _uiEventFlow.emit(UiEvent.ShowErrorDialog(AppError.DatabaseOperationError))
             }
         }

@@ -83,25 +83,31 @@ class OcrWorker @AssistedInject constructor(
                 )
 
                 val plainText = result.plainText.ifBlank { null }
-                documentDao.updatePage(
-                    page.copy(
-                        extractedText    = plainText,
-                        wordBoxesJson    = if (result.wordBoxes.isNotEmpty())
-                            WordBox.toJson(result.wordBoxes) else null,
-                        isTextUserEdited = false,
-                        ocrStatus        = OcrStatus.DONE
-                    )
-                )
 
-                if (!plainText.isNullOrBlank()) {
-                    documentDao.upsertFtsPageEntry(
-                        pageId          = page.id,
-                        documentOwnerId = page.documentOwnerId,
-                        pageNumber      = page.pageNumber,
-                        text            = plainText
-                    )
+                // Если OCR вернул пустой результат — не затираем ранее сохранённые данные
+                if (plainText == null && !page.extractedText.isNullOrBlank()) {
+                    documentDao.updatePageOcrStatus(page.id, OcrStatus.DONE)
                 } else {
-                    documentDao.deleteFtsPageEntry(page.id)
+                    documentDao.updatePage(
+                        page.copy(
+                            extractedText    = plainText,
+                            wordBoxesJson    = if (result.wordBoxes.isNotEmpty())
+                                WordBox.toJson(result.wordBoxes) else null,
+                            isTextUserEdited = false,
+                            ocrStatus        = OcrStatus.DONE
+                        )
+                    )
+
+                    if (!plainText.isNullOrBlank()) {
+                        documentDao.upsertFtsPageEntry(
+                            pageId          = page.id,
+                            documentOwnerId = page.documentOwnerId,
+                            pageNumber      = page.pageNumber,
+                            text            = plainText
+                        )
+                    } else {
+                        documentDao.deleteFtsPageEntry(page.id)
+                    }
                 }
 
             } catch (e: Exception) {

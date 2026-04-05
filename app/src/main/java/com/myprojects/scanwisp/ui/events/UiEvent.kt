@@ -57,4 +57,13 @@ sealed class UiEvent {
      * Событие для запроса показа диалога оценки приложения.
      */
     object RequestInAppReview : UiEvent()
+
+    /**
+     * Событие, сигнализирующее экрану запустить сканер для пересъёмки.
+     * Экран сам получает Activity и вызывает viewModel.launchRescan(activity).
+     */
+    object TriggerRescan : UiEvent()
+
+    /** Поделиться распознанным текстом через системный ShareSheet */
+    data class ShareText(val text: String) : UiEvent()
 }

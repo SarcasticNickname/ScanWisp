@@ -101,4 +101,8 @@ interface SettingsRepository {
 
     val defaultOcrLanguage: Flow<OcrLanguage>
     suspend fun saveDefaultOcrLanguage(language: OcrLanguage)
+
+    /** Количество дней хранения в корзине до авто-удаления. Значения: 7, 30, -1 (никогда). */
+    val trashRetentionDays: Flow<Int>
+    suspend fun saveTrashRetentionDays(days: Int)
 }

@@ -351,10 +351,13 @@ fun HomeScreen(
     if (shareDialogState.isVisible) {
         ExportBottomSheet(
             onDismissRequest = viewModel::onShareDialogDismiss,
-            onConfirm = viewModel::onShareDialogConfirm,
+            onConfirm = { format, filename, pdfProfile, fitToA4 ->
+                viewModel.onShareDialogConfirm(format, filename, pdfProfile, fitToA4)
+            },
             pageCount = shareDialogState.pageCount,
             defaultFilename = shareDialogState.defaultName,
-            action = shareDialogState.action
+            action = shareDialogState.action,
+            estimatedSourceBytes = shareDialogState.estimatedBytes
         )
     }
 
@@ -391,7 +394,8 @@ fun HomeScreen(
             onFolderSelected = { folderId ->
                 viewModel.moveSelectedDocuments(folderId)
                 showMoveDialogForSelection = false
-            }
+            },
+            onCreateFolder = { name -> viewModel.createFolder(name) }
         )
     }
 
@@ -402,7 +406,8 @@ fun HomeScreen(
             onFolderSelected = { folderId ->
                 viewModel.moveDocument(docId, folderId)
                 showMoveDialogForDocumentId = null
-            }
+            },
+            onCreateFolder = { name -> viewModel.createFolder(name) }
         )
     }
 
